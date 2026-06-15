@@ -11,8 +11,8 @@
 <meta name="mobile-web-app-capable" content="yes" />
 <meta name="application-name" content="Forge" />
 <link rel="manifest" href="./manifest.json" />
-<link rel="apple-touch-icon" href="./icons/icon-180.png" />
-<link rel="icon" type="image/png" sizes="192x192" href="./icons/icon-192.png" />
+<link rel="apple-touch-icon" href="./icon-180.png" />
+<link rel="icon" type="image/png" sizes="192x192" href="./icon-192.png" />
 
 <style>
 :root{
@@ -102,7 +102,7 @@ function load(){
 function migrate(data){
   const d = Object.assign({version:5,settings:{},exercises:[],templates:[],sessions:[],cardio:[],body:[],goals:[],activeSession:null}, data||{});
   d.version = 5;
-  d.settings = Object.assign({theme:'dark',weightUnit:'kg',distanceUnit:'km',defaultRest:120,name:'Athlete',defaultIncrement:2.5,createdAt:nowIso()}, d.settings||{});
+  d.settings = Object.assign({theme:'dark',weightUnit:'kg',distanceUnit:'km',defaultRest:120,name:'Thaddeus',defaultIncrement:2.5,createdAt:nowIso()}, d.settings||{});
   d.exercises = (d.exercises||[]).map(e => Object.assign({id:uid(),name:'Exercise',muscle:'',equipment:'',notes:'',goalMin:null,goalMax:null,increment:null,sticky:''}, e));
   d.templates = d.templates||[]; d.sessions = d.sessions||[]; d.cardio = d.cardio||[]; d.body = d.body||[]; d.goals = d.goals||[];
   return d;
