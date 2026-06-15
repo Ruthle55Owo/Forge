@@ -45,7 +45,7 @@ input,select,textarea{width:100%;border:1px solid var(--line);background:var(--p
 <div class="app" id="app">
   <aside class="side" id="side">
     <div class="brand"><div class="logo"></div><div><h1>Forge Athlete</h1><p>local-first training log</p></div></div>
-    <div class="notice small">Saved on this browser/device. Export backups if you switch browsers.</div>
+    <div class="notice small">Local-first. Optional Google Sheets mirror in Settings.</div>
     <nav class="nav" id="nav"></nav>
     <div class="footer-note">Storage key: <span class="kbd">forge_fitness_tracker_v5</span></div>
   </aside>
@@ -102,7 +102,8 @@ function load(){
 function migrate(data){
   const d = Object.assign({version:5,settings:{},exercises:[],templates:[],sessions:[],cardio:[],body:[],goals:[],activeSession:null}, data||{});
   d.version = 5;
-  d.settings = Object.assign({theme:'dark',weightUnit:'kg',distanceUnit:'km',defaultRest:120,name:'Thaddeus',defaultIncrement:2.5,createdAt:nowIso()}, d.settings||{});
+  d.settings = Object.assign({theme:'dark',weightUnit:'kg',distanceUnit:'km',defaultRest:120,name:'Thaddeus',defaultIncrement:2.5,createdAt:nowIso(),lastBackupAt:'',cloudSync:{enabled:false,auto:true,url:'',token:'',lastSync:'',lastAttempt:'',lastError:'',pending:false,pendingReason:''}}, d.settings||{});
+  d.settings.cloudSync = Object.assign({enabled:false,auto:true,url:'',token:'',lastSync:'',lastAttempt:'',lastError:'',pending:false,pendingReason:''}, d.settings.cloudSync||{});
   d.exercises = (d.exercises||[]).map(e => Object.assign({id:uid(),name:'Exercise',muscle:'',equipment:'',notes:'',goalMin:null,goalMax:null,increment:null,sticky:''}, e));
   d.templates = d.templates||[]; d.sessions = d.sessions||[]; d.cardio = d.cardio||[]; d.body = d.body||[]; d.goals = d.goals||[];
   return d;
@@ -297,9 +298,82 @@ function renderBody(){
   const rows = [...db.body].sort((a,b)=>String(b.date).localeCompare(String(a.date))).map(b=>`<tr><td>${fmtDate(b.date)}</td><td>${b.weight||''}</td><td>${b.sleep||''}</td><td>${b.steps||''}</td><td>${esc(b.notes||'')}</td><td><button class="btn bad" data-del-body="${b.id}">Delete</button></td></tr>`).join('');
   return `<div class="grid cols2"><div class="card"><h3>Add body/recovery</h3><div class="fields two"><div class="field"><label>Date</label><input id="bodyDate" type="date" value="${today()}"></div><div class="field"><label>Weight kg</label><input id="bodyWeight" type="number" step="0.1"></div><div class="field"><label>Sleep hours</label><input id="bodySleep" type="number" step="0.1"></div><div class="field"><label>Steps</label><input id="bodySteps" type="number"></div></div><div class="field"><label>Notes</label><textarea id="bodyNotes" placeholder="sore? bad sleep? exams?"></textarea></div><button class="btn primary" id="addBody">Add</button></div><div class="card"><h3>Body trend</h3><canvas id="bodyChart" class="chart mini-chart"></canvas></div></div><div class="card" style="margin-top:16px"><h3>Body history</h3><table><tr><th>Date</th><th>Weight</th><th>Sleep</th><th>Steps</th><th>Notes</th><th></th></tr>${rows}</table></div>`;
 }
+let syncInFlight = false;
+function cloudCfg(){
+  db.settings.cloudSync = Object.assign({enabled:false,auto:true,url:'',token:'',lastSync:'',lastAttempt:'',lastError:'',pending:false,pendingReason:''}, db.settings.cloudSync||{});
+  return db.settings.cloudSync;
+}
+function cloudSyncStatusText(){
+  const c = cloudCfg();
+  if(!c.url) return 'Not connected';
+  if(c.lastError && c.pending) return 'Queued for retry: ' + c.lastError;
+  if(c.pending) return 'Queued: will retry when online/open. Reason: ' + (c.pendingReason||'unsynced log');
+  if(c.lastSync) return 'Last successful/assumed push: ' + new Date(c.lastSync).toLocaleString();
+  if(c.lastAttempt) return 'Last push attempt: ' + new Date(c.lastAttempt).toLocaleString();
+  return 'Connected, not pushed yet';
+}
+function sheetSyncCard(){
+  const c = cloudCfg();
+  const enabled = c.enabled ? 'checked' : '';
+  const auto = c.auto !== false ? 'checked' : '';
+  const pendingPill = c.pending ? '<span class="pill warn">Pending sync</span>' : '<span class="pill good">No pending sync</span>';
+  return `<div class="card"><h3>Google Sheets mirror</h3><div class="notice"><strong>Local-first + auto mirror:</strong><br>Forge saves to this phone instantly. If enabled, it auto-pushes a full mirror to your Google Sheet right after each finished workout, cardio log, body log, or delete. If Wi-Fi/data fails, the sync stays queued and retries later.</div><div class="fields"><div class="field"><label>Apps Script Web App URL</label><input id="syncUrl" placeholder="https://script.google.com/macros/s/.../exec" value="${esc(c.url||'')}"></div><div class="field"><label>Secret token</label><input id="syncToken" placeholder="same token as your Apps Script" value="${esc(c.token||'')}"></div></div><div class="row" style="margin-top:10px"><label class="pill"><input id="syncEnabled" type="checkbox" ${enabled}> Enable Sheets mirror</label><label class="pill"><input id="syncAuto" type="checkbox" ${auto}> Auto-push after every saved log</label>${pendingPill}</div><p class="muted small">${esc(cloudSyncStatusText())}<br>Because this uses a cross-origin Apps Script post, Forge can confirm that it sent the data, but Google may still reject a bad token/script. After first setup, check your Sheet once.</p><div class="row"><button class="btn primary" id="saveSyncSettings">Save sync settings</button><button class="btn good" id="syncNow">Push all data now</button><button class="btn" id="retrySyncNow">Retry queued sync</button><button class="btn" id="copyScriptHelp">Setup steps</button></div></div>`;
+}
+function markSyncPending(reason){
+  const c = cloudCfg();
+  c.pending = true;
+  c.pendingReason = reason || 'unsynced log';
+  save();
+}
+function maybeAutoSync(reason){
+  const c = cloudCfg();
+  if(c.enabled && c.auto !== false && c.url && c.token){
+    markSyncPending(reason);
+    syncAllToSheets(false, reason);
+  }
+}
+async function syncAllToSheets(manual=false, reason='manual'){
+  const c = cloudCfg();
+  if(!c.url || !c.token){ if(manual) alert('Add your Apps Script URL and secret token first.'); return; }
+  if(syncInFlight){ if(manual) alert('A Sheets push is already running.'); return; }
+  syncInFlight = true;
+  c.lastAttempt = nowIso();
+  c.pending = true;
+  c.pendingReason = reason || c.pendingReason || 'manual';
+  c.lastError = '';
+  save();
+  const payload = {action:'syncAll', token:c.token, reason, sentAt:nowIso(), app:'Forge Athlete', db:db};
+  try{
+    await fetch(c.url, {method:'POST', mode:'no-cors', headers:{'Content-Type':'text/plain;charset=utf-8'}, body:JSON.stringify(payload)});
+    c.lastSync = nowIso();
+    c.lastError = '';
+    c.pending = false;
+    c.pendingReason = '';
+    save();
+    if(manual) alert('Sent to Google Sheets. Open the Sheet and check the Sessions/Sets tabs.');
+  }catch(err){
+    c.pending = true;
+    c.lastError = err && err.message ? err.message : String(err);
+    save();
+    if(manual) alert('Could not send to Sheets yet. It is queued and will retry: ' + c.lastError);
+  } finally {
+    syncInFlight = false;
+    if(view === 'settings') render();
+  }
+}
+function retryQueuedSync(){
+  const c = cloudCfg();
+  if(c.enabled && c.url && c.token && c.pending && !syncInFlight){
+    syncAllToSheets(false, 'retry: ' + (c.pendingReason || 'queued sync'));
+  }
+}
+window.addEventListener('online', retryQueuedSync);
+setInterval(retryQueuedSync, 5 * 60 * 1000);
+setTimeout(retryQueuedSync, 1500);
 function renderSettings(){
   const bytes = new Blob([JSON.stringify(db)]).size;
-  return `<div class="grid cols2"><div class="card"><h3>Storage explained</h3><div class="notice"><strong>Why data changes between browsers:</strong><br>Forge stores logs in this browser’s localStorage. Chrome, Edge, Safari, phone browser, and private tabs do not share the same saved data. Different file paths can also behave like different storage places.</div><p class="muted small">Current key: <span class="kbd">${APP_KEY}</span><br>Data size: ${Math.round(bytes/1024)} KB</p><div class="row"><button class="btn primary" id="exportData">Export JSON backup</button><label class="btn">Import JSON<input id="importData" type="file" accept="application/json" hidden></label><button class="btn bad" id="wipeData">Wipe this browser</button></div></div><div class="card"><h3>Preferences</h3><div class="fields two"><div class="field"><label>Name</label><input id="setName" value="${esc(db.settings.name||'')}"></div><div class="field"><label>Theme</label><select id="setTheme"><option value="dark" ${db.settings.theme==='dark'?'selected':''}>dark</option><option value="light" ${db.settings.theme==='light'?'selected':''}>light</option></select></div><div class="field"><label>Default rest sec</label><input id="setRest" type="number" value="${db.settings.defaultRest||120}"></div><div class="field"><label>Default increment kg</label><input id="setInc" type="number" step="0.5" value="${db.settings.defaultIncrement||2.5}"></div></div><button class="btn primary" id="saveSettings" style="margin-top:10px">Save settings</button></div></div><div class="card" style="margin-top:16px"><h3>Feature checklist added</h3><div class="row"><span class="pill good">Individual exercise graphs</span><span class="pill good">Next targets</span><span class="pill good">Best / safe / stretch / avoid</span><span class="pill good">Rep records</span><span class="pill good">RPE field</span><span class="pill good">Set types</span><span class="pill good">Custom rep range</span><span class="pill good">Import old backup</span></div></div>`;
+  const backup = db.settings.lastBackupAt ? new Date(db.settings.lastBackupAt).toLocaleString() : 'never';
+  return `<div class="grid cols2"><div class="card"><h3>Storage explained</h3><div class="notice"><strong>Why data changes between browsers:</strong><br>Forge stores logs in this browser’s localStorage. Chrome, Edge, Safari, phone browser, and private tabs do not share the same saved data. Different file paths can also behave like different storage places.</div><p class="muted small">Current key: <span class="kbd">${APP_KEY}</span><br>Data size: ${Math.round(bytes/1024)} KB<br>Last manual backup: ${esc(backup)}</p><div class="row"><button class="btn primary" id="exportData">Export JSON backup</button><label class="btn">Import JSON<input id="importData" type="file" accept="application/json" hidden></label><button class="btn bad" id="wipeData">Wipe this browser</button></div></div><div class="card"><h3>Preferences</h3><div class="fields two"><div class="field"><label>Name</label><input id="setName" value="${esc(db.settings.name||'')}"></div><div class="field"><label>Theme</label><select id="setTheme"><option value="dark" ${db.settings.theme==='dark'?'selected':''}>dark</option><option value="light" ${db.settings.theme==='light'?'selected':''}>light</option></select></div><div class="field"><label>Default rest sec</label><input id="setRest" type="number" value="${db.settings.defaultRest||120}"></div><div class="field"><label>Default increment kg</label><input id="setInc" type="number" step="0.5" value="${db.settings.defaultIncrement||2.5}"></div></div><button class="btn primary" id="saveSettings" style="margin-top:10px">Save settings</button></div></div><div class="grid cols2" style="margin-top:16px">${sheetSyncCard()}<div class="card"><h3>Data safety</h3><p class="muted">Best setup: phone local storage for speed, Google Sheet mirror for easy viewing, and manual JSON exports for full restore.</p><div class="row"><span class="pill good">Local-first</span><span class="pill good">Optional Sheets mirror</span><span class="pill good">Manual JSON backup</span></div><p class="muted small">Do not put your secret token in GitHub. Only type it into this Settings page on your own phone.</p></div></div><div class="card" style="margin-top:16px"><h3>Feature checklist added</h3><div class="row"><span class="pill good">Individual exercise graphs</span><span class="pill good">Next targets</span><span class="pill good">Best / safe / stretch / avoid</span><span class="pill good">Rep records</span><span class="pill good">RPE field</span><span class="pill good">Set types</span><span class="pill good">Custom rep range</span><span class="pill good">Sheets mirror</span></div></div>`;
 }
 function bind(){
   $('#quickLog').onclick=()=>{view='log';render()}; $('#quickExport').onclick=exportData; $('#menuBtn').onclick=()=>$('#side').classList.toggle('open');
@@ -346,7 +420,7 @@ function copyPreviousIntoActive(i){
   ex.sets = last.sets.map(s=>({id:uid(),weight:String(s.weight||''),reps:String(s.reps||''),rpe:'',done:false,type:'working'})); save(); render();
 }
 function finishWorkout(){
-  if(!db.activeSession) return; db.activeSession.end=nowIso(); db.sessions.push(clone(db.activeSession)); db.activeSession=null; save(); view='history'; render();
+  if(!db.activeSession) return; db.activeSession.end=nowIso(); db.sessions.push(clone(db.activeSession)); db.activeSession=null; save(); maybeAutoSync('workout'); view='history'; render();
 }
 function startRest(sec){ stopRest(); restTimer.total=sec; restTimer.left=sec; tickTimer(); restTimer.id=setInterval(tickTimer,1000); }
 function stopRest(){ if(restTimer.id) clearInterval(restTimer.id); restTimer={id:null,left:0,total:0}; const el=$('#timerText'); if(el) el.textContent='Ready'; }
@@ -356,10 +430,20 @@ function bindHistory(){ $$('[data-delete-session]').forEach(b=>b.onclick=()=>{if
 function showSession(id){ const s=db.sessions.find(x=>x.id===id); if(!s)return; showModal(`<div class="between"><h3>${esc(s.name)}</h3><button class="btn" id="closeModal">Close</button></div>${sessionSummary(s)}`); $('#closeModal').onclick=hideModal; }
 function bindExercises(){ $('#newExercise').onclick=()=>editExercise(); $$('[data-edit-ex]').forEach(b=>b.onclick=()=>editExercise(b.dataset.editEx)); }
 function editExercise(id){ const e = id ? exById(id) : {id:uid(),name:'',muscle:'',equipment:'',notes:'',goalMin:null,goalMax:null,increment:null,sticky:''}; showModal(`<h3>${id?'Edit':'New'} exercise</h3><div class="fields two"><div class="field"><label>Name</label><input id="exName" value="${esc(e.name)}"></div><div class="field"><label>Muscle</label><input id="exMuscle" value="${esc(e.muscle)}"></div><div class="field"><label>Equipment</label><input id="exEquip" value="${esc(e.equipment)}"></div><div class="field"><label>Increment kg</label><input id="exInc" type="number" step="0.5" value="${e.increment||''}"></div><div class="field"><label>Rep min</label><input id="exMin" type="number" value="${e.goalMin||''}"></div><div class="field"><label>Rep max</label><input id="exMax" type="number" value="${e.goalMax||''}"></div></div><div class="field"><label>Sticky note shown during workouts</label><textarea id="exSticky">${esc(e.sticky||'')}</textarea></div><div class="field"><label>Notes</label><textarea id="exNotes">${esc(e.notes||'')}</textarea></div><div class="row"><button class="btn primary" id="saveEx">Save</button><button class="btn" id="closeModal">Cancel</button></div>`); $('#closeModal').onclick=hideModal; $('#saveEx').onclick=()=>{ e.name=$('#exName').value||'Exercise'; e.muscle=$('#exMuscle').value; e.equipment=$('#exEquip').value; e.increment=num($('#exInc').value)||null; e.goalMin=num($('#exMin').value)||null; e.goalMax=num($('#exMax').value)||null; e.sticky=$('#exSticky').value; e.notes=$('#exNotes').value; if(!id) db.exercises.push(e); save(); hideModal(); render(); }; }
-function bindCardio(){ $('#addCardio').onclick=()=>{db.cardio.push({id:uid(),date:$('#cardioDate').value,type:$('#cardioType').value,distance:$('#cardioDist').value,minutes:$('#cardioMin').value,hr:$('#cardioHr').value,notes:$('#cardioNotes').value});save();render();}; $$('[data-del-cardio]').forEach(b=>b.onclick=()=>{db.cardio=db.cardio.filter(c=>c.id!==b.dataset.delCardio);save();render();}); }
-function bindBody(){ $('#addBody').onclick=()=>{db.body.push({id:uid(),date:$('#bodyDate').value,weight:$('#bodyWeight').value,sleep:$('#bodySleep').value,steps:$('#bodySteps').value,notes:$('#bodyNotes').value});save();render();}; $$('[data-del-body]').forEach(b=>b.onclick=()=>{db.body=db.body.filter(c=>c.id!==b.dataset.delBody);save();render();}); }
-function bindSettings(){ $('#exportData').onclick=exportData; $('#importData').onchange=importData; $('#wipeData').onclick=()=>{ if(confirm('Wipe Forge data in this browser? Export first if needed.')){ localStorage.removeItem(APP_KEY); db=clone(seed); save(); render(); } }; $('#saveSettings').onclick=()=>{db.settings.name=$('#setName').value; db.settings.theme=$('#setTheme').value; db.settings.defaultRest=num($('#setRest').value)||120; db.settings.defaultIncrement=num($('#setInc').value)||2.5; save(); render();}; }
-function exportData(){ const blob = new Blob([JSON.stringify(db,null,2)],{type:'application/json'}); const a=document.createElement('a'); a.href=URL.createObjectURL(blob); a.download=`forge-athlete-backup-${today()}.json`; a.click(); setTimeout(()=>URL.revokeObjectURL(a.href),1000); }
+function bindCardio(){ $('#addCardio').onclick=()=>{db.cardio.push({id:uid(),date:$('#cardioDate').value,type:$('#cardioType').value,distance:$('#cardioDist').value,minutes:$('#cardioMin').value,hr:$('#cardioHr').value,notes:$('#cardioNotes').value});save(); maybeAutoSync('cardio'); render();}; $$('[data-del-cardio]').forEach(b=>b.onclick=()=>{db.cardio=db.cardio.filter(c=>c.id!==b.dataset.delCardio);save(); maybeAutoSync('cardio delete'); render();}); }
+function bindBody(){ $('#addBody').onclick=()=>{db.body.push({id:uid(),date:$('#bodyDate').value,weight:$('#bodyWeight').value,sleep:$('#bodySleep').value,steps:$('#bodySteps').value,notes:$('#bodyNotes').value});save(); maybeAutoSync('body'); render();}; $$('[data-del-body]').forEach(b=>b.onclick=()=>{db.body=db.body.filter(c=>c.id!==b.dataset.delBody);save(); maybeAutoSync('body delete'); render();}); }
+function bindSettings(){
+  $('#exportData').onclick=exportData;
+  $('#importData').onchange=importData;
+  $('#wipeData').onclick=()=>{ if(confirm('Wipe Forge data in this browser? Export first if needed.')){ localStorage.removeItem(APP_KEY); db=clone(seed); save(); render(); } };
+  $('#saveSettings').onclick=()=>{db.settings.name=$('#setName').value; db.settings.theme=$('#setTheme').value; db.settings.defaultRest=num($('#setRest').value)||120; db.settings.defaultIncrement=num($('#setInc').value)||2.5; save(); render();};
+  const saveSync=$('#saveSyncSettings'); if(saveSync) saveSync.onclick=()=>{ const c=cloudCfg(); c.url=$('#syncUrl').value.trim(); c.token=$('#syncToken').value.trim(); c.enabled=$('#syncEnabled').checked; c.auto=$('#syncAuto').checked; c.lastError=''; save(); alert('Sheets sync settings saved on this device only.'); render(); };
+  const syncNow=$('#syncNow'); if(syncNow) syncNow.onclick=()=>{ const c=cloudCfg(); c.url=$('#syncUrl').value.trim(); c.token=$('#syncToken').value.trim(); c.enabled=$('#syncEnabled').checked; c.auto=$('#syncAuto').checked; markSyncPending('manual push'); save(); syncAllToSheets(true, 'manual'); };
+  const retrySyncNow=$('#retrySyncNow'); if(retrySyncNow) retrySyncNow.onclick=()=>{ const c=cloudCfg(); c.url=$('#syncUrl').value.trim(); c.token=$('#syncToken').value.trim(); c.enabled=$('#syncEnabled').checked; c.auto=$('#syncAuto').checked; markSyncPending(c.pendingReason||'manual retry'); save(); syncAllToSheets(true, 'manual retry'); };
+  const help=$('#copyScriptHelp'); if(help) help.onclick=()=>{ showModal(`<div class="between"><h3>Google Sheets setup</h3><button class="btn" id="closeModal">Close</button></div><ol class="muted"><li>Create a Google Sheet named Forge Training Log.</li><li>Go to Extensions → Apps Script.</li><li>Paste the code from <strong>google-apps-script.gs</strong>.</li><li>Change <strong>SECRET_TOKEN</strong> to your own random phrase.</li><li>Deploy → New deployment → Web app.</li><li>Execute as: Me. Access: Anyone with the link.</li><li>Copy the /exec URL back into Forge Settings.</li></ol><p class="muted small">The token and URL are stored only in this browser/app storage.</p>`); $('#closeModal').onclick=hideModal; };
+}
+
+function exportData(){ db.settings.lastBackupAt=nowIso(); save(); const blob = new Blob([JSON.stringify(db,null,2)],{type:'application/json'}); const a=document.createElement('a'); a.href=URL.createObjectURL(blob); a.download=`forge-athlete-backup-${today()}.json`; a.click(); setTimeout(()=>URL.revokeObjectURL(a.href),1000); }
 function importData(e){ const file=e.target.files[0]; if(!file)return; const r=new FileReader(); r.onload=()=>{try{db=migrate(JSON.parse(r.result)); save(); alert('Imported backup.'); render();}catch(err){alert('Could not import JSON.')}}; r.readAsText(file); }
 function showModal(html){ $('#modal').innerHTML=html; $('#modalBack').classList.add('show'); }
 function hideModal(){ $('#modalBack').classList.remove('show'); $('#modal').innerHTML=''; }
