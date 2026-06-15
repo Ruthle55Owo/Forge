@@ -1,40 +1,45 @@
-# Forge Athlete — phone PWA with optional Google Sheets mirror
+# Forge Athlete — Two-Way Google Sheets Sync PWA
 
-Upload these files to the root of your GitHub Pages repo. Do not upload your personal backup JSON.
+This version is local-first but can use Google Sheets/Drive as the shared sync source.
 
-## Files to upload to GitHub Pages
-- index.html
-- manifest.json
-- sw.js
-- .nojekyll
-- icon-180.png
-- icon-192.png
-- icon-512.png
-- README.md
+## What changed
 
-## Optional Google Sheets sync
-1. Create a Google Sheet named `Forge Training Log`.
-2. In the Sheet, go to Extensions -> Apps Script.
-3. Paste `google-apps-script.gs` into Code.gs.
-4. Change `SECRET_TOKEN` to a long random phrase.
-5. Deploy -> New deployment -> Web app.
-   - Execute as: Me
-   - Who has access: Anyone with the link
-6. Copy the Web App `/exec` URL.
-7. Open Forge -> Settings -> Google Sheets mirror.
-8. Paste the URL and the same secret token, enable sync, and press Push all data now.
+- Auto-pull latest cloud backup when Forge opens.
+- Manual **Pull latest now** button.
+- Auto-push full data after saved workout/cardio/body logs.
+- Manual **Push all data now** button.
+- Merge logic so phone + laptop can both keep their own local copy while sharing through the same Google Sheet backup.
+- Secret token and Apps Script URL stay only in each device's local storage.
 
-Keep the script URL and token off GitHub. Type them only inside Forge Settings on your own phone.
+## Upload these to GitHub Pages
 
+Upload these files to the root of your GitHub Pages repo:
 
-## Auto-sync behavior
+- `index.html`
+- `manifest.json`
+- `sw.js`
+- `.nojekyll`
+- `README.md`
+- `icon-180.png`
+- `icon-192.png`
+- `icon-512.png`
 
-This build pushes a full Google Sheets mirror after every saved log when Settings -> Google Sheets mirror is enabled and Auto-push is checked.
+Do not upload workout backup JSON files.
 
-It triggers after:
-- Finish workout
-- Add cardio
-- Add body/recovery entry
-- Delete cardio/body entry
+## Apps Script update
 
-If the phone is offline or the request fails, Forge keeps a pending sync flag and retries when the app is opened, when the phone comes back online, and every 5 minutes while the app is open.
+You must replace your current Apps Script code with the new `google-apps-script.gs` in this package, then deploy a **new version** of the web app.
+
+Settings:
+
+- Execute as: **Me**
+- Who has access: **Anyone**
+
+Then copy the `/exec` URL into Forge Settings with the same secret token.
+
+## Recommended flow
+
+1. Use your iPhone Home Screen Forge app as the main logger.
+2. After each workout, Forge saves locally and pushes to Sheets.
+3. When you open Forge on laptop, it pulls latest from Sheets automatically.
+4. Still export JSON sometimes for emergency full restore.

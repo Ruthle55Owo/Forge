@@ -44,8 +44,8 @@ input,select,textarea{width:100%;border:1px solid var(--line);background:var(--p
 <body>
 <div class="app" id="app">
   <aside class="side" id="side">
-    <div class="brand"><div class="logo"></div><div><h1>Forge Athlete</h1><p>local-first training log</p></div></div>
-    <div class="notice small">Local-first. Optional Google Sheets mirror in Settings.</div>
+    <div class="brand"><div class="logo"></div><div><h1>Forge Athlete</h1><p>two-way synced training log</p></div></div>
+    <div class="notice small">Local-first. Optional two-way Google Sheets sync in Settings.</div>
     <nav class="nav" id="nav"></nav>
     <div class="footer-note">Storage key: <span class="kbd">forge_fitness_tracker_v5</span></div>
   </aside>
@@ -100,10 +100,10 @@ function load(){
   return data;
 }
 function migrate(data){
-  const d = Object.assign({version:5,settings:{},exercises:[],templates:[],sessions:[],cardio:[],body:[],goals:[],activeSession:null}, data||{});
-  d.version = 5;
-  d.settings = Object.assign({theme:'dark',weightUnit:'kg',distanceUnit:'km',defaultRest:120,name:'Thaddeus',defaultIncrement:2.5,createdAt:nowIso(),lastBackupAt:'',cloudSync:{enabled:false,auto:true,url:'',token:'',lastSync:'',lastAttempt:'',lastError:'',pending:false,pendingReason:''}}, d.settings||{});
-  d.settings.cloudSync = Object.assign({enabled:false,auto:true,url:'',token:'',lastSync:'',lastAttempt:'',lastError:'',pending:false,pendingReason:''}, d.settings.cloudSync||{});
+  const d = Object.assign({version:6,settings:{},exercises:[],templates:[],sessions:[],cardio:[],body:[],goals:[],activeSession:null}, data||{});
+  d.version = Math.max(num(d.version)||0, 6);
+  d.settings = Object.assign({theme:'dark',weightUnit:'kg',distanceUnit:'km',defaultRest:120,name:'Thaddeus',defaultIncrement:2.5,createdAt:nowIso(),lastBackupAt:'',cloudSync:{enabled:false,auto:true,url:'',token:'',lastSync:'',lastError:''}}, d.settings||{});
+  d.settings.cloudSync = Object.assign({enabled:false,auto:true,url:'',token:'',lastSync:'',lastError:''}, d.settings.cloudSync||{});
   d.exercises = (d.exercises||[]).map(e => Object.assign({id:uid(),name:'Exercise',muscle:'',equipment:'',notes:'',goalMin:null,goalMax:null,increment:null,sticky:''}, e));
   d.templates = d.templates||[]; d.sessions = d.sessions||[]; d.cardio = d.cardio||[]; d.body = d.body||[]; d.goals = d.goals||[];
   return d;
@@ -298,82 +298,146 @@ function renderBody(){
   const rows = [...db.body].sort((a,b)=>String(b.date).localeCompare(String(a.date))).map(b=>`<tr><td>${fmtDate(b.date)}</td><td>${b.weight||''}</td><td>${b.sleep||''}</td><td>${b.steps||''}</td><td>${esc(b.notes||'')}</td><td><button class="btn bad" data-del-body="${b.id}">Delete</button></td></tr>`).join('');
   return `<div class="grid cols2"><div class="card"><h3>Add body/recovery</h3><div class="fields two"><div class="field"><label>Date</label><input id="bodyDate" type="date" value="${today()}"></div><div class="field"><label>Weight kg</label><input id="bodyWeight" type="number" step="0.1"></div><div class="field"><label>Sleep hours</label><input id="bodySleep" type="number" step="0.1"></div><div class="field"><label>Steps</label><input id="bodySteps" type="number"></div></div><div class="field"><label>Notes</label><textarea id="bodyNotes" placeholder="sore? bad sleep? exams?"></textarea></div><button class="btn primary" id="addBody">Add</button></div><div class="card"><h3>Body trend</h3><canvas id="bodyChart" class="chart mini-chart"></canvas></div></div><div class="card" style="margin-top:16px"><h3>Body history</h3><table><tr><th>Date</th><th>Weight</th><th>Sleep</th><th>Steps</th><th>Notes</th><th></th></tr>${rows}</table></div>`;
 }
-let syncInFlight = false;
 function cloudCfg(){
-  db.settings.cloudSync = Object.assign({enabled:false,auto:true,url:'',token:'',lastSync:'',lastAttempt:'',lastError:'',pending:false,pendingReason:''}, db.settings.cloudSync||{});
+  db.settings.cloudSync = Object.assign({enabled:false,auto:true,autoPull:true,url:'',token:'',lastSync:'',lastError:'',lastPull:'',lastPullError:'',lastRemoteSavedAt:''}, db.settings.cloudSync||{});
   return db.settings.cloudSync;
+}
+function dataSummary(d){
+  return {
+    sessions:(d.sessions||[]).length,
+    sets:(d.sessions||[]).reduce((a,s)=>a+sessionSets(s),0),
+    cardio:(d.cardio||[]).length,
+    body:(d.body||[]).length,
+    exercises:(d.exercises||[]).length,
+    hash:dataFingerprint(d)
+  };
+}
+function dataFingerprint(d){
+  const slim = {
+    sessions:(d.sessions||[]).map(s=>[s.id,s.date,s.end,sessionSets(s),Math.round(sessionVolume(s))]).sort(),
+    cardio:(d.cardio||[]).map(c=>[c.id,c.date,c.type,c.distance,c.minutes]).sort(),
+    body:(d.body||[]).map(b=>[b.id,b.date,b.weight,b.sleep,b.steps]).sort(),
+    exercises:(d.exercises||[]).map(e=>[e.id,e.name,e.goalMin,e.goalMax,e.increment,e.sticky]).sort(),
+    goals:(d.goals||[]).map(g=>[g.id,g.text,!!g.done]).sort()
+  };
+  const str = JSON.stringify(slim);
+  let h = 0; for(let i=0;i<str.length;i++){ h=((h<<5)-h)+str.charCodeAt(i); h|=0; }
+  return String(h);
+}
+function sanitizeDbForCloud(){
+  const copy = clone(db);
+  copy.settings = copy.settings || {};
+  copy.settings.cloudSync = {enabled:false,auto:true,autoPull:true,lastSync:db.settings.cloudSync?.lastSync||'',lastPull:db.settings.cloudSync?.lastPull||''};
+  copy.activeSession = null;
+  copy.settings.syncedFrom = 'Forge Athlete';
+  copy.settings.syncedAt = nowIso();
+  return copy;
+}
+function mergeById(remoteArr=[], localArr=[], keepLocalOnConflict=false){
+  const map = new Map();
+  remoteArr.forEach(x=>{ if(x && x.id) map.set(x.id, clone(x)); });
+  localArr.forEach(x=>{ if(!x || !x.id) return; if(!map.has(x.id) || keepLocalOnConflict) map.set(x.id, clone(x)); });
+  return [...map.values()];
+}
+function mergeRemoteDb(remoteRaw){
+  const localCloud = clone(cloudCfg());
+  const localActive = db.activeSession ? clone(db.activeSession) : null;
+  const before = dataSummary(db);
+  const remote = migrate(remoteRaw || {});
+  const merged = clone(db);
+  merged.version = Math.max(num(db.version), num(remote.version), 6) || 6;
+  merged.settings = Object.assign({}, remote.settings||{}, db.settings||{});
+  merged.settings.cloudSync = localCloud;
+  merged.exercises = mergeById(remote.exercises, db.exercises, true);
+  merged.templates = mergeById(remote.templates, db.templates, true);
+  merged.sessions = mergeById(remote.sessions, db.sessions, false).sort((a,b)=>String(a.date||'').localeCompare(String(b.date||'')));
+  merged.cardio = mergeById(remote.cardio, db.cardio, false).sort((a,b)=>String(a.date||'').localeCompare(String(b.date||'')));
+  merged.body = mergeById(remote.body, db.body, false).sort((a,b)=>String(a.date||'').localeCompare(String(b.date||'')));
+  merged.goals = mergeById(remote.goals, db.goals, true);
+  merged.activeSession = localActive;
+  db = migrate(merged);
+  db.settings.cloudSync = localCloud;
+  const after = dataSummary(db);
+  return {before, after, changed: before.hash !== after.hash};
 }
 function cloudSyncStatusText(){
   const c = cloudCfg();
   if(!c.url) return 'Not connected';
-  if(c.lastError && c.pending) return 'Queued for retry: ' + c.lastError;
-  if(c.pending) return 'Queued: will retry when online/open. Reason: ' + (c.pendingReason||'unsynced log');
-  if(c.lastSync) return 'Last successful/assumed push: ' + new Date(c.lastSync).toLocaleString();
-  if(c.lastAttempt) return 'Last push attempt: ' + new Date(c.lastAttempt).toLocaleString();
-  return 'Connected, not pushed yet';
+  const parts=[];
+  if(c.lastSync) parts.push('last push ' + new Date(c.lastSync).toLocaleString());
+  if(c.lastPull) parts.push('last pull ' + new Date(c.lastPull).toLocaleString());
+  if(c.lastRemoteSavedAt) parts.push('cloud saved ' + new Date(c.lastRemoteSavedAt).toLocaleString());
+  if(c.lastError) parts.push('push error: ' + c.lastError);
+  if(c.lastPullError) parts.push('pull error: ' + c.lastPullError);
+  return parts.length ? parts.join(' · ') : 'Connected, not synced yet';
 }
 function sheetSyncCard(){
   const c = cloudCfg();
   const enabled = c.enabled ? 'checked' : '';
   const auto = c.auto !== false ? 'checked' : '';
-  const pendingPill = c.pending ? '<span class="pill warn">Pending sync</span>' : '<span class="pill good">No pending sync</span>';
-  return `<div class="card"><h3>Google Sheets mirror</h3><div class="notice"><strong>Local-first + auto mirror:</strong><br>Forge saves to this phone instantly. If enabled, it auto-pushes a full mirror to your Google Sheet right after each finished workout, cardio log, body log, or delete. If Wi-Fi/data fails, the sync stays queued and retries later.</div><div class="fields"><div class="field"><label>Apps Script Web App URL</label><input id="syncUrl" placeholder="https://script.google.com/macros/s/.../exec" value="${esc(c.url||'')}"></div><div class="field"><label>Secret token</label><input id="syncToken" placeholder="same token as your Apps Script" value="${esc(c.token||'')}"></div></div><div class="row" style="margin-top:10px"><label class="pill"><input id="syncEnabled" type="checkbox" ${enabled}> Enable Sheets mirror</label><label class="pill"><input id="syncAuto" type="checkbox" ${auto}> Auto-push after every saved log</label>${pendingPill}</div><p class="muted small">${esc(cloudSyncStatusText())}<br>Because this uses a cross-origin Apps Script post, Forge can confirm that it sent the data, but Google may still reject a bad token/script. After first setup, check your Sheet once.</p><div class="row"><button class="btn primary" id="saveSyncSettings">Save sync settings</button><button class="btn good" id="syncNow">Push all data now</button><button class="btn" id="retrySyncNow">Retry queued sync</button><button class="btn" id="copyScriptHelp">Setup steps</button></div></div>`;
-}
-function markSyncPending(reason){
-  const c = cloudCfg();
-  c.pending = true;
-  c.pendingReason = reason || 'unsynced log';
-  save();
+  const autoPull = c.autoPull !== false ? 'checked' : '';
+  return `<div class="card"><h3>Google Sheets two-way sync</h3><div class="notice"><strong>Local-first + shared cloud brain:</strong><br>Forge saves to this device instantly. If enabled, it pulls the newest cloud backup on open and pushes a full copy after saved logs.</div><div class="fields"><div class="field"><label>Apps Script Web App URL</label><input id="syncUrl" placeholder="https://script.google.com/macros/s/.../exec" value="${esc(c.url||'')}"></div><div class="field"><label>Secret token</label><input id="syncToken" placeholder="same token as your Apps Script" value="${esc(c.token||'')}"></div></div><div class="row" style="margin-top:10px"><label class="pill"><input id="syncEnabled" type="checkbox" ${enabled}> Enable Sheets sync</label><label class="pill"><input id="syncAuto" type="checkbox" ${auto}> Auto-push after saved logs</label><label class="pill"><input id="syncAutoPull" type="checkbox" ${autoPull}> Auto-pull on open</label></div><p class="muted small">${esc(cloudSyncStatusText())}<br>Phone and laptop are separate local copies, but both can pull/push through the same Sheet backup.</p><div class="row"><button class="btn primary" id="saveSyncSettings">Save sync settings</button><button class="btn good" id="pullNow">Pull latest now</button><button class="btn good" id="syncNow">Push all data now</button><button class="btn" id="copyScriptHelp">Setup steps</button></div></div>`;
 }
 function maybeAutoSync(reason){
   const c = cloudCfg();
-  if(c.enabled && c.auto !== false && c.url && c.token){
-    markSyncPending(reason);
-    syncAllToSheets(false, reason);
-  }
+  if(c.enabled && c.auto !== false && c.url && c.token) syncAllToSheets(false, reason);
+}
+function maybeAutoPull(reason='open'){
+  const c = cloudCfg();
+  if(c.enabled && c.autoPull !== false && c.url && c.token && !db.activeSession) pullLatestFromSheets(false, reason);
 }
 async function syncAllToSheets(manual=false, reason='manual'){
   const c = cloudCfg();
   if(!c.url || !c.token){ if(manual) alert('Add your Apps Script URL and secret token first.'); return; }
-  if(syncInFlight){ if(manual) alert('A Sheets push is already running.'); return; }
-  syncInFlight = true;
-  c.lastAttempt = nowIso();
-  c.pending = true;
-  c.pendingReason = reason || c.pendingReason || 'manual';
-  c.lastError = '';
-  save();
-  const payload = {action:'syncAll', token:c.token, reason, sentAt:nowIso(), app:'Forge Athlete', db:db};
+  const payload = {action:'syncAll', token:c.token, reason, sentAt:nowIso(), app:'Forge Athlete', db:sanitizeDbForCloud()};
   try{
     await fetch(c.url, {method:'POST', mode:'no-cors', headers:{'Content-Type':'text/plain;charset=utf-8'}, body:JSON.stringify(payload)});
-    c.lastSync = nowIso();
-    c.lastError = '';
-    c.pending = false;
-    c.pendingReason = '';
+    c.lastSync = nowIso(); c.lastError = '';
     save();
-    if(manual) alert('Sent to Google Sheets. Open the Sheet and check the Sessions/Sets tabs.');
+    if(manual) alert('Sent to Google Sheets. Open the Sheet and check the SyncLog tab.');
   }catch(err){
-    c.pending = true;
     c.lastError = err && err.message ? err.message : String(err);
     save();
-    if(manual) alert('Could not send to Sheets yet. It is queued and will retry: ' + c.lastError);
-  } finally {
-    syncInFlight = false;
-    if(view === 'settings') render();
+    if(manual) alert('Could not send to Sheets: ' + c.lastError);
   }
 }
-function retryQueuedSync(){
+function jsonp(url, params={}, timeoutMs=14000){
+  return new Promise((resolve,reject)=>{
+    const cb = '__forgePull_' + Date.now() + '_' + Math.random().toString(36).slice(2);
+    const qs = Object.entries(Object.assign({}, params, {callback:cb})).map(([k,v])=>encodeURIComponent(k)+'='+encodeURIComponent(v==null?'':v)).join('&');
+    const src = url + (url.includes('?')?'&':'?') + qs;
+    const script = document.createElement('script');
+    const timer = setTimeout(()=>{ cleanup(); reject(new Error('Pull timed out. Check Apps Script URL/token/deployment.')); }, timeoutMs);
+    function cleanup(){ clearTimeout(timer); try{ delete window[cb]; }catch(e){ window[cb]=undefined; } if(script.parentNode) script.parentNode.removeChild(script); }
+    window[cb] = data => { cleanup(); resolve(data); };
+    script.onerror = () => { cleanup(); reject(new Error('Could not load Apps Script response.')); };
+    script.src = src;
+    document.body.appendChild(script);
+  });
+}
+async function pullLatestFromSheets(manual=false, reason='manual'){
   const c = cloudCfg();
-  if(c.enabled && c.url && c.token && c.pending && !syncInFlight){
-    syncAllToSheets(false, 'retry: ' + (c.pendingReason || 'queued sync'));
+  if(!c.url || !c.token){ if(manual) alert('Add your Apps Script URL and secret token first.'); return; }
+  if(db.activeSession && manual && !confirm('You have an active workout. Pulling will keep the active workout, but it is safer to finish/export first. Continue?')) return;
+  try{
+    const res = await jsonp(c.url, {action:'pullLatest', token:c.token, reason, at:nowIso()});
+    if(!res || !res.ok) throw new Error((res && res.error) || 'Apps Script returned no data.');
+    if(!res.db){ c.lastPull=nowIso(); c.lastPullError=''; save(); if(manual) alert('Connected, but no cloud backup exists yet. Press Push all data now first on your main device.'); return; }
+    const info = mergeRemoteDb(res.db);
+    const cc = cloudCfg();
+    cc.lastPull = nowIso(); cc.lastPullError = ''; cc.lastRemoteSavedAt = res.savedAt || '';
+    save();
+    if(manual) alert(info.changed ? `Pulled and merged cloud data. Sessions: ${info.before.sessions} → ${info.after.sessions}.` : 'Pulled latest. No new data to merge.');
+    if(info.changed) render();
+  }catch(err){
+    const cc = cloudCfg(); cc.lastPullError = err && err.message ? err.message : String(err); save();
+    if(manual) alert('Could not pull from Sheets: ' + cc.lastPullError);
   }
 }
-window.addEventListener('online', retryQueuedSync);
-setInterval(retryQueuedSync, 5 * 60 * 1000);
-setTimeout(retryQueuedSync, 1500);
 function renderSettings(){
   const bytes = new Blob([JSON.stringify(db)]).size;
   const backup = db.settings.lastBackupAt ? new Date(db.settings.lastBackupAt).toLocaleString() : 'never';
-  return `<div class="grid cols2"><div class="card"><h3>Storage explained</h3><div class="notice"><strong>Why data changes between browsers:</strong><br>Forge stores logs in this browser’s localStorage. Chrome, Edge, Safari, phone browser, and private tabs do not share the same saved data. Different file paths can also behave like different storage places.</div><p class="muted small">Current key: <span class="kbd">${APP_KEY}</span><br>Data size: ${Math.round(bytes/1024)} KB<br>Last manual backup: ${esc(backup)}</p><div class="row"><button class="btn primary" id="exportData">Export JSON backup</button><label class="btn">Import JSON<input id="importData" type="file" accept="application/json" hidden></label><button class="btn bad" id="wipeData">Wipe this browser</button></div></div><div class="card"><h3>Preferences</h3><div class="fields two"><div class="field"><label>Name</label><input id="setName" value="${esc(db.settings.name||'')}"></div><div class="field"><label>Theme</label><select id="setTheme"><option value="dark" ${db.settings.theme==='dark'?'selected':''}>dark</option><option value="light" ${db.settings.theme==='light'?'selected':''}>light</option></select></div><div class="field"><label>Default rest sec</label><input id="setRest" type="number" value="${db.settings.defaultRest||120}"></div><div class="field"><label>Default increment kg</label><input id="setInc" type="number" step="0.5" value="${db.settings.defaultIncrement||2.5}"></div></div><button class="btn primary" id="saveSettings" style="margin-top:10px">Save settings</button></div></div><div class="grid cols2" style="margin-top:16px">${sheetSyncCard()}<div class="card"><h3>Data safety</h3><p class="muted">Best setup: phone local storage for speed, Google Sheet mirror for easy viewing, and manual JSON exports for full restore.</p><div class="row"><span class="pill good">Local-first</span><span class="pill good">Optional Sheets mirror</span><span class="pill good">Manual JSON backup</span></div><p class="muted small">Do not put your secret token in GitHub. Only type it into this Settings page on your own phone.</p></div></div><div class="card" style="margin-top:16px"><h3>Feature checklist added</h3><div class="row"><span class="pill good">Individual exercise graphs</span><span class="pill good">Next targets</span><span class="pill good">Best / safe / stretch / avoid</span><span class="pill good">Rep records</span><span class="pill good">RPE field</span><span class="pill good">Set types</span><span class="pill good">Custom rep range</span><span class="pill good">Sheets mirror</span></div></div>`;
+  return `<div class="grid cols2"><div class="card"><h3>Storage explained</h3><div class="notice"><strong>Why data changes between browsers:</strong><br>Forge stores logs in this browser’s localStorage. Chrome, Edge, Safari, phone browser, and private tabs do not share the same saved data. Different file paths can also behave like different storage places.</div><p class="muted small">Current key: <span class="kbd">${APP_KEY}</span><br>Data size: ${Math.round(bytes/1024)} KB<br>Last manual backup: ${esc(backup)}</p><div class="row"><button class="btn primary" id="exportData">Export JSON backup</button><label class="btn">Import JSON<input id="importData" type="file" accept="application/json" hidden></label><button class="btn bad" id="wipeData">Wipe this browser</button></div></div><div class="card"><h3>Preferences</h3><div class="fields two"><div class="field"><label>Name</label><input id="setName" value="${esc(db.settings.name||'')}"></div><div class="field"><label>Theme</label><select id="setTheme"><option value="dark" ${db.settings.theme==='dark'?'selected':''}>dark</option><option value="light" ${db.settings.theme==='light'?'selected':''}>light</option></select></div><div class="field"><label>Default rest sec</label><input id="setRest" type="number" value="${db.settings.defaultRest||120}"></div><div class="field"><label>Default increment kg</label><input id="setInc" type="number" step="0.5" value="${db.settings.defaultIncrement||2.5}"></div></div><button class="btn primary" id="saveSettings" style="margin-top:10px">Save settings</button></div></div><div class="grid cols2" style="margin-top:16px">${sheetSyncCard()}<div class="card"><h3>Data safety</h3><p class="muted">Best setup: phone local storage for speed, Google Sheet mirror for easy viewing, and manual JSON exports for full restore.</p><div class="row"><span class="pill good">Local-first</span><span class="pill good">Optional Sheets mirror</span><span class="pill good">Manual JSON backup</span></div><p class="muted small">Do not put your secret token in GitHub. Only type it into this Settings page on your own phone.</p></div></div><div class="card" style="margin-top:16px"><h3>Feature checklist added</h3><div class="row"><span class="pill good">Individual exercise graphs</span><span class="pill good">Next targets</span><span class="pill good">Best / safe / stretch / avoid</span><span class="pill good">Rep records</span><span class="pill good">RPE field</span><span class="pill good">Set types</span><span class="pill good">Custom rep range</span><span class="pill good">Two-way Sheets sync</span></div></div>`;
 }
 function bind(){
   $('#quickLog').onclick=()=>{view='log';render()}; $('#quickExport').onclick=exportData; $('#menuBtn').onclick=()=>$('#side').classList.toggle('open');
@@ -437,10 +501,10 @@ function bindSettings(){
   $('#importData').onchange=importData;
   $('#wipeData').onclick=()=>{ if(confirm('Wipe Forge data in this browser? Export first if needed.')){ localStorage.removeItem(APP_KEY); db=clone(seed); save(); render(); } };
   $('#saveSettings').onclick=()=>{db.settings.name=$('#setName').value; db.settings.theme=$('#setTheme').value; db.settings.defaultRest=num($('#setRest').value)||120; db.settings.defaultIncrement=num($('#setInc').value)||2.5; save(); render();};
-  const saveSync=$('#saveSyncSettings'); if(saveSync) saveSync.onclick=()=>{ const c=cloudCfg(); c.url=$('#syncUrl').value.trim(); c.token=$('#syncToken').value.trim(); c.enabled=$('#syncEnabled').checked; c.auto=$('#syncAuto').checked; c.lastError=''; save(); alert('Sheets sync settings saved on this device only.'); render(); };
-  const syncNow=$('#syncNow'); if(syncNow) syncNow.onclick=()=>{ const c=cloudCfg(); c.url=$('#syncUrl').value.trim(); c.token=$('#syncToken').value.trim(); c.enabled=$('#syncEnabled').checked; c.auto=$('#syncAuto').checked; markSyncPending('manual push'); save(); syncAllToSheets(true, 'manual'); };
-  const retrySyncNow=$('#retrySyncNow'); if(retrySyncNow) retrySyncNow.onclick=()=>{ const c=cloudCfg(); c.url=$('#syncUrl').value.trim(); c.token=$('#syncToken').value.trim(); c.enabled=$('#syncEnabled').checked; c.auto=$('#syncAuto').checked; markSyncPending(c.pendingReason||'manual retry'); save(); syncAllToSheets(true, 'manual retry'); };
-  const help=$('#copyScriptHelp'); if(help) help.onclick=()=>{ showModal(`<div class="between"><h3>Google Sheets setup</h3><button class="btn" id="closeModal">Close</button></div><ol class="muted"><li>Create a Google Sheet named Forge Training Log.</li><li>Go to Extensions → Apps Script.</li><li>Paste the code from <strong>google-apps-script.gs</strong>.</li><li>Change <strong>SECRET_TOKEN</strong> to your own random phrase.</li><li>Deploy → New deployment → Web app.</li><li>Execute as: Me. Access: Anyone with the link.</li><li>Copy the /exec URL back into Forge Settings.</li></ol><p class="muted small">The token and URL are stored only in this browser/app storage.</p>`); $('#closeModal').onclick=hideModal; };
+  const saveSync=$('#saveSyncSettings'); if(saveSync) saveSync.onclick=()=>{ const c=cloudCfg(); c.url=$('#syncUrl').value.trim(); c.token=$('#syncToken').value.trim(); c.enabled=$('#syncEnabled').checked; c.auto=$('#syncAuto').checked; c.autoPull=$('#syncAutoPull').checked; c.lastError=''; c.lastPullError=''; save(); alert('Sheets sync settings saved on this device only.'); render(); };
+  const syncNow=$('#syncNow'); if(syncNow) syncNow.onclick=()=>{ const c=cloudCfg(); c.url=$('#syncUrl').value.trim(); c.token=$('#syncToken').value.trim(); c.enabled=$('#syncEnabled').checked; c.auto=$('#syncAuto').checked; c.autoPull=$('#syncAutoPull').checked; save(); syncAllToSheets(true, 'manual'); };
+  const pullNow=$('#pullNow'); if(pullNow) pullNow.onclick=()=>{ const c=cloudCfg(); c.url=$('#syncUrl').value.trim(); c.token=$('#syncToken').value.trim(); c.enabled=$('#syncEnabled').checked; c.auto=$('#syncAuto').checked; c.autoPull=$('#syncAutoPull').checked; save(); pullLatestFromSheets(true, 'manual'); };
+  const help=$('#copyScriptHelp'); if(help) help.onclick=()=>{ showModal(`<div class="between"><h3>Google Sheets setup</h3><button class="btn" id="closeModal">Close</button></div><ol class="muted"><li>Create a Google Sheet named Forge Training Log.</li><li>Go to Extensions → Apps Script.</li><li>Paste the code from <strong>google-apps-script.gs</strong>.</li><li>Change <strong>SECRET_TOKEN</strong> to your own random phrase.</li><li>Deploy → New deployment → Web app.</li><li>Execute as: Me. Access: Anyone with the link.</li><li>Copy the /exec URL back into Forge Settings.</li><li>Press Pull latest now / Push all data now to test both directions.</li></ol><p class="muted small">The token and URL are stored only in this browser/app storage. Do not upload them to GitHub.</p>`); $('#closeModal').onclick=hideModal; };
 }
 
 function exportData(){ db.settings.lastBackupAt=nowIso(); save(); const blob = new Blob([JSON.stringify(db,null,2)],{type:'application/json'}); const a=document.createElement('a'); a.href=URL.createObjectURL(blob); a.download=`forge-athlete-backup-${today()}.json`; a.click(); setTimeout(()=>URL.revokeObjectURL(a.href),1000); }
@@ -463,6 +527,9 @@ function drawBars(canvas, data, key){ const {ctx,w,h}=prepCanvas(canvas); ctx.cl
 function text(ctx,str,x,y,align){ ctx.fillStyle=getCss('--muted'); ctx.textAlign=align||'left'; ctx.font='12px system-ui'; ctx.fillText(String(str),x,y); }
 function getCss(v){ return getComputedStyle(document.documentElement).getPropertyValue(v).trim(); }
 render();
+setTimeout(()=>maybeAutoPull('open'), 900);
+window.addEventListener('online', ()=>maybeAutoPull('online'));
+document.addEventListener('visibilitychange', ()=>{ if(document.visibilityState==='visible') maybeAutoPull('visible'); });
 })();
 </script>
 
