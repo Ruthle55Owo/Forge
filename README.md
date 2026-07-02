@@ -1,19 +1,19 @@
-# Forge Athlete — Two-Way Google Sheets Sync PWA
+# Forge Athlete — v7 Senior Build
 
-This version is local-first but can use Google Sheets/Drive as the shared sync source.
+Local-first workout tracker PWA with optional two-way Google Sheets sync.
 
-## What changed
+## New in v7
 
-- Auto-pull latest cloud backup when Forge opens.
-- Manual **Pull latest now** button.
-- Auto-push full data after saved workout/cardio/body logs.
-- Manual **Push all data now** button.
-- Merge logic so phone + laptop can both keep their own local copy while sharing through the same Google Sheet backup.
-- Secret token and Apps Script URL stay only in each device's local storage.
+- Expanded 200-exercise library with cleaned names for the user's current lifts.
+- Smarter next-target logic using last workout, rep range, trend, stacked exercise order, same-muscle fatigue, and superset context.
+- Overtime goals: the app gives a 4-week style progression aim, not only a next-session number.
+- Preset workout/template builder inside the app.
+- Superset groups A/B/C/D/E in both templates and live workout logging.
+- Save active workout or last finished workout as a reusable template.
 
-## Upload these to GitHub Pages
+## Files to upload to GitHub Pages
 
-Upload these files to the root of your GitHub Pages repo:
+Upload these to the root of the repo:
 
 - `index.html`
 - `manifest.json`
@@ -24,22 +24,10 @@ Upload these files to the root of your GitHub Pages repo:
 - `icon-192.png`
 - `icon-512.png`
 
-Do not upload workout backup JSON files.
+Do not upload workout backup JSON files or any file containing your Google Sheets sync token.
 
-## Apps Script update
+## Apps Script
 
-You must replace your current Apps Script code with the new `google-apps-script.gs` in this package, then deploy a **new version** of the web app.
+Keep using `google-apps-script.gs` for the Google Sheets sync. The sync stores the whole Forge JSON, so the new template/superset fields are included automatically.
 
-Settings:
-
-- Execute as: **Me**
-- Who has access: **Anyone**
-
-Then copy the `/exec` URL into Forge Settings with the same secret token.
-
-## Recommended flow
-
-1. Use your iPhone Home Screen Forge app as the main logger.
-2. After each workout, Forge saves locally and pushes to Sheets.
-3. When you open Forge on laptop, it pulls latest from Sheets automatically.
-4. Still export JSON sometimes for emergency full restore.
+After replacing website files, hard refresh the site once. On mobile, reopen the Home Screen app. If the old version is stuck, clear site data or change the `?v=forge-v7` start URL/cache version.

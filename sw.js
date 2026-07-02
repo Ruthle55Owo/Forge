@@ -1,4 +1,4 @@
-const CACHE_NAME = 'forge-pwa-v2.0.0';
+const CACHE_NAME = 'forge-pwa-v7.0.0';
 const APP_SHELL = [
   './',
   './index.html',
