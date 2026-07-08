@@ -1,8 +1,8 @@
 {
   "name": "Forge \u2014 Training Tracker",
   "short_name": "Forge",
-  "description": "Local-first workout, progression, supersets, templates and cardio tracker.",
-  "start_url": "./?v=forge-v7",
+  "description": "Comprehensive local-first workout, recovery, progression and cardio tracker.",
+  "start_url": "./?v=v9coach",
   "scope": "./",
   "display": "standalone",
   "orientation": "portrait",

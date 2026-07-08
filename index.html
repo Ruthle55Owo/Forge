@@ -39,7 +39,7 @@ input,select,textarea{width:100%;border:1px solid var(--line);background:var(--p
   .nav button{min-height:46px}
 }
 
-.group-badge{display:inline-flex;align-items:center;gap:5px;border:1px solid rgba(167,139,250,.45);background:rgba(167,139,250,.13);color:var(--accent2);padding:4px 8px;border-radius:999px;font-size:12px;font-weight:800}.stack-note{border:1px solid rgba(167,139,250,.32);background:rgba(167,139,250,.08);border-radius:14px;padding:10px;margin-top:8px}.template-row{display:grid;grid-template-columns:2fr 1fr .8fr .7fr auto;gap:8px;align-items:end;margin:8px 0}.library-count{font-weight:800;color:var(--accent)}
+.group-badge{display:inline-flex;align-items:center;gap:5px;border:1px solid rgba(167,139,250,.45);background:rgba(167,139,250,.13);color:var(--accent2);padding:4px 8px;border-radius:999px;font-size:12px;font-weight:800}.stack-note{border:1px solid rgba(167,139,250,.32);background:rgba(167,139,250,.08);border-radius:14px;padding:10px;margin-top:8px}.template-row{display:grid;grid-template-columns:2fr 1fr .8fr .7fr auto;gap:8px;align-items:end;margin:8px 0}.library-count{font-weight:800;color:var(--accent)}.meter{height:10px;background:var(--panel2);border:1px solid var(--line);border-radius:999px;overflow:hidden}.meter>span{display:block;height:100%;background:linear-gradient(90deg,var(--accent),var(--accent2));width:0}.meter.good>span{background:var(--good)}.meter.warn>span{background:var(--warn)}.meter.bad>span{background:var(--bad)}.coach-score{font-size:44px;font-weight:900;line-height:1}.method-card code{white-space:normal}.flag{border-left:4px solid var(--warn);padding-left:10px}
 @media(max-width:900px){.template-row{grid-template-columns:1fr}.template-row button{width:100%}}
 
 </style>
@@ -90,7 +90,7 @@ let selectedMetric = 'bestE1rm';
 let activeMetricTab = 'overview';
 let restTimer = {id:null,left:0,total:0};
 const pages = [
- ['dashboard','Dashboard','overview'],['log','Log workout','live training'],['next','Next targets','what to aim for'],['templates','Templates','preset builder + supersets'],['progress','Progression','exercise analytics'],['history','History','past sessions'],['exercises','Exercises','library + targets'],['cardio','Cardio','runs / bike'],['body','Body','weight + notes'],['settings','Settings','backup + storage']
+ ['dashboard','Dashboard','overview'],['coach','Coach','readiness + load'],['log','Log workout','live training'],['next','Next targets','what to aim for'],['templates','Templates','preset builder + supersets'],['progress','Progression','exercise analytics'],['history','History','past sessions'],['exercises','Exercises','library + targets'],['cardio','Cardio','runs / bike'],['body','Body','recovery + notes'],['methods','Methods','calculations + evidence'],['settings','Settings','backup + storage']
 ];
 function load(){
   let raw = localStorage.getItem(APP_KEY);
@@ -166,13 +166,13 @@ function mergeSeedTemplates(list){
   return [...map.values()];
 }
 function migrate(data){
-  const d = Object.assign({version:7,settings:{},exercises:[],templates:[],sessions:[],cardio:[],body:[],goals:[],activeSession:null}, data||{});
-  d.version = Math.max(num(d.version)||0, 7);
-  d.settings = Object.assign({theme:'dark',weightUnit:'kg',distanceUnit:'km',defaultRest:120,name:'Thaddeus',defaultIncrement:2.5,createdAt:nowIso(),lastBackupAt:'',cloudSync:{enabled:false,auto:true,autoPull:true,url:'',token:'',lastSync:'',lastError:'',lastPull:'',lastPullError:''}}, d.settings||{});
+  const d = Object.assign({version:9,settings:{},exercises:[],templates:[],sessions:[],cardio:[],body:[],goals:[],activeSession:null}, data||{});
+  d.version = Math.max(num(d.version)||0, 9);
+  d.settings = Object.assign({theme:'dark',weightUnit:'kg',distanceUnit:'km',defaultRest:120,name:'Thaddeus',age:18,defaultIncrement:2.5,createdAt:nowIso(),lastBackupAt:'',cloudSync:{enabled:false,auto:true,autoPull:true,url:'',token:'',lastSync:'',lastError:'',lastPull:'',lastPullError:''}}, d.settings||{});
   d.settings.cloudSync = Object.assign({enabled:false,auto:true,autoPull:true,url:'',token:'',lastSync:'',lastError:'',lastPull:'',lastPullError:'',lastRemoteSavedAt:''}, d.settings.cloudSync||{});
   d.exercises = mergeSeedExercises(d.exercises||[]);
   d.templates = mergeSeedTemplates(d.templates||[]);
-  d.sessions = d.sessions||[]; d.cardio = d.cardio||[]; d.body = d.body||[]; d.goals = d.goals||[];
+  d.sessions = d.sessions||[]; d.cardio = d.cardio||[]; d.body = (d.body||[]).map(b=>Object.assign({energy:'',soreness:'',stress:'',protein:'',calories:''}, b)); d.goals = d.goals||[];
   d.sessions.forEach(s => (s.exercises||[]).forEach(ex => { if(ex.groupId == null) ex.groupId=''; if(!ex.name) ex.name=findExerciseNameSafe(ex.exerciseId, d.exercises); }));
   if(d.activeSession) (d.activeSession.exercises||[]).forEach(ex => { if(ex.groupId == null) ex.groupId=''; });
   return d;
@@ -266,11 +266,100 @@ function recentMuscleLoad(){
   (last.exercises||[]).forEach(ex => { const vol = doneSets(ex).reduce((a,s)=>a+setVolume(s),0); muscleTokensFor(ex.exerciseId).forEach(m=>map.set(m,(map.get(m)||0)+vol)); });
   return [...map.entries()].sort((a,b)=>b[1]-a[1]).map(([muscle,volume])=>({muscle,volume}));
 }
+function sessionTimeMs(sess){
+  const raw = sess && (sess.end || sess.start);
+  if(raw){ const t = new Date(raw).getTime(); if(Number.isFinite(t)) return t; }
+  if(sess && sess.date){ const t = new Date(sess.date + 'T12:00:00').getTime(); if(Number.isFinite(t)) return t; }
+  return 0;
+}
+function recentBodySleep(days=5){
+  const cutoff = Date.now() - days*24*60*60*1000;
+  const vals = (db.body||[]).filter(b=>num(b.sleep)>0 && new Date((b.date||'')+'T12:00:00').getTime() >= cutoff).map(b=>num(b.sleep));
+  if(!vals.length) return 0;
+  return vals.reduce((a,b)=>a+b,0)/vals.length;
+}
+function recoveryContextFor(exerciseId){
+  const muscles = muscleTokensFor(exerciseId);
+  const now = Date.now();
+  const relevant = [...(db.sessions||[])].filter(sess => (sess.exercises||[]).some(ex => doneSets(ex).length && muscleTokensFor(ex.exerciseId).some(m=>muscles.includes(m)))).sort((a,b)=>sessionTimeMs(b)-sessionTimeMs(a));
+  const last = relevant[0] || null;
+  let hoursSince = null, sameVol = 0, recentVol = 0, lastRpe = 0;
+  if(last){
+    const t = sessionTimeMs(last); hoursSince = t ? (now - t) / 36e5 : null;
+    (last.exercises||[]).forEach(ex => { if(muscleTokensFor(ex.exerciseId).some(m=>muscles.includes(m))) sameVol += doneSets(ex).reduce((a,s)=>a+setVolume(s),0); });
+  }
+  const cutoff = now - 96*36e5;
+  (db.sessions||[]).forEach(sess => {
+    const t = sessionTimeMs(sess); if(!t || t < cutoff) return;
+    (sess.exercises||[]).forEach(ex => { if(muscleTokensFor(ex.exerciseId).some(m=>muscles.includes(m))) recentVol += doneSets(ex).reduce((a,s)=>a+setVolume(s),0); });
+  });
+  const exact = exerciseSessionEntries(exerciseId).slice(-1)[0];
+  if(exact) lastRpe = Math.max(0, ...exact.sets.map(s=>num(s.rpe)));
+  const sleep = recentBodySleep(5);
+  let score = 100, notes=[];
+  if(hoursSince != null){
+    if(hoursSince < 24){ score -= 30; notes.push(`same area trained about ${Math.max(1,Math.round(hoursSince))}h ago`); }
+    else if(hoursSince < 48){ score -= 18; notes.push(`same area trained about ${Math.round(hoursSince)}h ago`); }
+    else if(hoursSince < 72){ score -= 8; notes.push(`same area trained about ${Math.round(hoursSince)}h ago`); }
+    else notes.push(`same area last trained ${Math.round(hoursSince/24)}d ago`);
+  } else notes.push('no recent same-area session found');
+  if(recentVol > 12000){ score -= 12; notes.push(`high recent same-area volume (${Math.round(recentVol)}kg/4d)`); }
+  else if(recentVol > 7000){ score -= 6; notes.push(`moderate recent same-area volume (${Math.round(recentVol)}kg/4d)`); }
+  if(sleep && sleep < 6){ score -= 15; notes.push(`low sleep avg ${round(sleep,1)}h`); }
+  else if(sleep && sleep < 7){ score -= 7; notes.push(`okay sleep avg ${round(sleep,1)}h`); }
+  if(lastRpe >= 9.5){ score -= 10; notes.push('last RPE was near max'); }
+  else if(lastRpe >= 8.5){ score -= 5; notes.push('last RPE was high'); }
+  const bodyCtx = bodyReadinessContext();
+  if(bodyCtx.score < 70){ score -= Math.round((70-bodyCtx.score)/3); notes.push('body readiness ' + bodyCtx.score + '/100'); }
+  score = Math.max(0, Math.min(100, Math.round(score)));
+  const label = score >= 85 ? 'Fresh' : score >= 70 ? 'Mostly recovered' : score >= 55 ? 'Fatigue likely' : 'Recovering';
+  return {score,label,hoursSince,sameVol,recentVol,sleep,lastRpe,note:notes.join(' · ')};
+}
+function liveSessionContextFor(exerciseIndex){
+  if(!db.activeSession || exerciseIndex == null || exerciseIndex < 0) return null;
+  const current = db.activeSession.exercises[exerciseIndex]; if(!current) return null;
+  const muscles = muscleTokensFor(current.exerciseId);
+  const before = (db.activeSession.exercises||[]).slice(0, exerciseIndex);
+  let sameSets=0,totalSets=0,sameVol=0,totalVol=0,supersetSets=0,lastSameMs=0;
+  before.forEach(ex => {
+    const sets = doneSets(ex); const vol = sets.reduce((a,s)=>a+setVolume(s),0);
+    totalSets += sets.length; totalVol += vol;
+    const overlap = muscleTokensFor(ex.exerciseId).some(m=>muscles.includes(m));
+    const sameGroup = current.groupId && ex.groupId && ex.groupId === current.groupId;
+    if(overlap || sameGroup){
+      sameSets += sets.length; sameVol += vol; if(sameGroup) supersetSets += sets.length;
+      sets.forEach(st => { const t = st.completedAt ? new Date(st.completedAt).getTime() : 0; if(t>lastSameMs) lastSameMs=t; });
+    }
+  });
+  const minutesSince = lastSameMs ? Math.max(0, Math.round((Date.now() - lastSameMs)/60000)) : null;
+  let score = 100;
+  score -= Math.min(35, sameSets * 6);
+  score -= Math.min(20, sameVol / 450);
+  score -= Math.min(16, totalSets * 1.4);
+  score -= Math.min(12, supersetSets * 4);
+  if(minutesSince != null && minutesSince >= 15) score += 6;
+  score = Math.max(0, Math.min(100, Math.round(score)));
+  const label = score >= 85 ? 'Fresh in-session' : score >= 70 ? 'Slightly fatigued' : score >= 55 ? 'Stack fatigue' : 'High fatigue';
+  const note = sameSets ? `${sameSets} same-area/superset set${sameSets===1?'':'s'} already done · ${Math.round(sameVol)}kg same-area volume${minutesSince!=null?` · last hit ${minutesSince}min ago`:''}` : (totalSets ? `${totalSets} total set${totalSets===1?'':'s'} already done, but little direct overlap` : 'no prior sets logged yet');
+  return {score,label,sameSets,totalSets,sameVol,totalVol,supersetSets,minutesSince,note};
+}
+function adjustedTargetForToday(t, exerciseIndex=null){
+  const recovery = recoveryContextFor(t.exerciseId);
+  const live = liveSessionContextFor(exerciseIndex);
+  const liveScore = live ? live.score : 100;
+  const combined = Math.min(recovery.score, liveScore);
+  let label='Best target', target=t.best, cls='goodbox', rule='Use normal progression.';
+  if(combined >= 90){ label='Stretch allowed'; target=t.stretch; cls='goodbox'; rule='Recovery and current-session fatigue look good.'; }
+  else if(combined >= 75){ label='Best target'; target=t.best; cls='goodbox'; rule='You look recovered enough for normal progression.'; }
+  else if(combined >= 60){ label='Safe target'; target=t.safe; cls='warnbox'; rule='Some fatigue is likely, so beat quality or total reps instead of forcing load.'; }
+  else { label='Repeat / reduce'; target=t.safe; cls='badbox'; rule='Fatigue is high. Treat this as maintenance or reduce load 5–10% if warm-ups feel slow.'; }
+  return {label,target,cls,rule,combined,recovery,live};
+}
 
 function targetFor(exerciseId){
   const entries = exerciseSessionEntries(exerciseId);
   const ex = exById(exerciseId), range = inferRange(exerciseId), inc = incrementFor(exerciseId);
-  if(!entries.length) return {exerciseId, name:ex.name, status:'No logs yet', confidence:'none', best:'Log a baseline: 2–3 working sets inside your target rep range.', safe:'Start conservative and leave 1–3 reps in reserve.', stretch:'Only push if form is clean.', avoid:'Do not max out before you have a baseline.', reason:'No past sets exist for this exercise yet.', score:0, range, last:null, entries};
+  if(!entries.length) return {exerciseId, name:ex.name, status:'No logs yet', confidence:'none', best:'Log a baseline: 2–3 working sets inside your target rep range.', safe:'Start conservative and leave 1–3 reps in reserve.', stretch:'Only push if form is clean.', avoid:'Do not max out before you have a baseline.', reason:'No past sets exist for this exercise yet.', score:0, range, last:null, entries, recovery:recoveryContextFor(exerciseId)};
   const last = entries[entries.length-1];
   const topSets = last.topSets.length ? last.topSets : last.sets;
   const minRep = Math.min(...topSets.map(s=>s.reps));
@@ -320,8 +409,10 @@ function targetFor(exerciseId){
   const confidence = entries.length >= 4 ? 'good' : entries.length >= 2 ? 'medium' : 'low';
   const stack = stackContextFor(last, exerciseId);
   const overtime = overtimeGoal(exerciseId, entries, range, inc);
+  const recovery = recoveryContextFor(exerciseId);
   if(stack.note){ reason += ' ' + stack.note; score = Math.max(0, score - stack.penalty); }
-  return {exerciseId,name:ex.name,status,confidence,best,safe,stretch,avoid,reason,score,range,last,prev,trend,entries,stack,overtime};
+  if(recovery && recovery.score < 70){ reason += ' Recovery check: ' + recovery.note + '.'; score = Math.max(0, score - Math.round((70-recovery.score)/4)); }
+  return {exerciseId,name:ex.name,status,confidence,best,safe,stretch,avoid,reason,score,range,last,prev,trend,entries,stack,overtime,recovery};
 }
 function distributeReps(total, sets, max, start){
   let arr = Array.from({length:sets},()=>Math.min(max, start));
@@ -346,6 +437,7 @@ function render(){
   const page = pages.find(p=>p[0]===view) || pages[0]; setTitle(page[1], page[2]);
   const root = $('#view');
   if(view==='dashboard') root.innerHTML = renderDashboard();
+  if(view==='coach') root.innerHTML = renderCoach();
   if(view==='log') root.innerHTML = renderLog();
   if(view==='next') root.innerHTML = renderNext();
   if(view==='templates') root.innerHTML = renderTemplates();
@@ -354,10 +446,111 @@ function render(){
   if(view==='exercises') root.innerHTML = renderExercises();
   if(view==='cardio') root.innerHTML = renderCardio();
   if(view==='body') root.innerHTML = renderBody();
+  if(view==='methods') root.innerHTML = renderMethods();
   if(view==='settings') root.innerHTML = renderSettings();
   bind();
   drawCharts();
 }
+
+function latestBodyCheckin(days=10){
+  const cutoff = Date.now() - days*24*60*60*1000;
+  const items = [...(db.body||[])].filter(b => new Date((b.date||'')+'T12:00:00').getTime() >= cutoff).sort((a,b)=>String(b.date||'').localeCompare(String(a.date||'')));
+  return items[0] || null;
+}
+function bodyReadinessContext(){
+  const b = latestBodyCheckin(10) || {};
+  let score = 100, notes=[];
+  const sleep=num(b.sleep), energy=num(b.energy), soreness=num(b.soreness), stress=num(b.stress), protein=num(b.protein);
+  if(sleep){ if(sleep<5.5){score-=30;notes.push(`very low sleep ${sleep}h`);} else if(sleep<6.5){score-=20;notes.push(`low sleep ${sleep}h`);} else if(sleep<7.5){score-=8;notes.push(`okay sleep ${sleep}h`);} else notes.push(`sleep ${sleep}h`); }
+  else notes.push('no sleep logged');
+  if(energy){ if(energy<=2){score-=18;notes.push('low energy');} else if(energy===3){score-=7;notes.push('medium energy');} else notes.push('good energy'); }
+  if(soreness){ score -= Math.min(24, soreness*4); notes.push(`soreness ${soreness}/5`); }
+  if(stress){ score -= Math.min(18, stress*3); notes.push(`stress ${stress}/5`); }
+  if(protein && protein < 100){ score-=5; notes.push(`protein ${protein}g`); }
+  score = Math.max(0, Math.min(100, Math.round(score)));
+  const label = score>=85?'Green':score>=70?'Mostly fine':score>=55?'Caution':'Recovery focus';
+  return {score,label,checkin:b,note:notes.join(' · ')};
+}
+function muscleSummary(days=7){
+  const cutoff = Date.now() - days*24*60*60*1000;
+  const map = new Map();
+  (db.sessions||[]).forEach(sess=>{
+    const t=sessionTimeMs(sess); if(!t || t<cutoff) return;
+    (sess.exercises||[]).forEach(ex=>{
+      const sets=doneSets(ex); if(!sets.length) return;
+      const vol=sets.reduce((a,s)=>a+setVolume(s),0); const rpe=Math.max(0,...sets.map(s=>num(s.rpe)));
+      muscleTokensFor(ex.exerciseId).forEach(m=>{
+        const o=map.get(m)||{muscle:m,sets:0,volume:0,lastTime:0,lastDate:'',rpe:0,exercises:new Set()};
+        o.sets += sets.length; o.volume += vol; o.rpe=Math.max(o.rpe,rpe); o.exercises.add(ex.exerciseId);
+        if(t>o.lastTime){ o.lastTime=t; o.lastDate=sess.date || (sess.start||'').slice(0,10); }
+        map.set(m,o);
+      });
+    });
+  });
+  return [...map.values()].map(o=>({muscle:o.muscle,sets:o.sets,volume:o.volume,lastTime:o.lastTime,lastDate:o.lastDate,rpe:o.rpe,exerciseCount:o.exercises.size})).sort((a,b)=>b.sets-a.sets);
+}
+function muscleReadiness(muscle){
+  const now=Date.now();
+  const s7 = muscleSummary(7).find(x=>x.muscle===muscle) || {sets:0,volume:0,lastTime:0,rpe:0,lastDate:''};
+  const s28 = muscleSummary(28).find(x=>x.muscle===muscle) || {sets:0,volume:0,lastTime:0,rpe:0,lastDate:''};
+  const body = bodyReadinessContext();
+  let score = 100, notes=[];
+  if(s7.lastTime){
+    const hours=(now-s7.lastTime)/36e5;
+    if(hours<24){score-=30;notes.push(`${Math.max(1,Math.round(hours))}h since hit`);} else if(hours<48){score-=18;notes.push(`${Math.round(hours)}h since hit`);} else if(hours<72){score-=8;notes.push(`${Math.round(hours)}h since hit`);} else notes.push(`${Math.round(hours/24)}d since hit`);
+  } else notes.push('not trained recently');
+  if(s7.sets>=20){score-=16;notes.push(`${s7.sets} sets/7d high`);} else if(s7.sets>=14){score-=8;notes.push(`${s7.sets} sets/7d moderate-high`);} else if(s7.sets<=3){score+=4;notes.push(`${s7.sets} sets/7d low`);} else notes.push(`${s7.sets} sets/7d`);
+  if(s7.rpe>=9.5){score-=8;notes.push('recent near-max RPE');} else if(s7.rpe>=8.5){score-=4;notes.push('recent high RPE');}
+  if(body.score<70) score -= Math.round((70-body.score)/3);
+  score=Math.max(0,Math.min(100,Math.round(score)));
+  const label=score>=85?'Train hard':score>=70?'Normal':score>=55?'Keep conservative':'Avoid heavy';
+  return {muscle,score,label,s7,s28,body,note:notes.join(' · ')};
+}
+function allMuscles(){
+  const set=new Set(); db.exercises.forEach(e=>muscleTokensFor(e.id).forEach(m=>set.add(m)));
+  return [...set].filter(Boolean).sort();
+}
+function coachWarnings(){
+  const warnings=[];
+  const s7=muscleSummary(7), s28=muscleSummary(28);
+  s7.forEach(m=>{
+    const m28=s28.find(x=>x.muscle===m.muscle); const avg28=m28 ? m28.sets/4 : 0;
+    if(avg28>0 && m.sets > avg28*1.5 && m.sets>=8) warnings.push(`${m.muscle}: this week is ${m.sets} sets vs ${round(avg28,1)}/week average. That is a big spike.`);
+    if(m.sets>=20) warnings.push(`${m.muscle}: ${m.sets} direct/overlap sets in 7 days. Consider keeping next session lower-risk.`);
+  });
+  allExerciseIdsWithLogs().forEach(id=>{
+    const e=exerciseSessionEntries(id).slice(-3); if(e.length>=3 && e[2].bestE1rm < e[1].bestE1rm && e[1].bestE1rm < e[0].bestE1rm) warnings.push(`${findExerciseName(id)}: estimated strength fell across the last 3 logs.`);
+  });
+  if(bodyReadinessContext().score<60) warnings.push(`Body check-in readiness is low: ${bodyReadinessContext().note}.`);
+  return warnings.slice(0,8);
+}
+function weeklyCardioSummary(){
+  const age=num(db.settings.age)||18, maxHr=208-(0.7*age);
+  const cutoff=Date.now()-7*24*60*60*1000;
+  let minutes=0, moderate=0, vigorous=0, easy=0;
+  (db.cardio||[]).forEach(c=>{
+    const t=new Date((c.date||'')+'T12:00:00').getTime(); if(!t || t<cutoff) return;
+    const min=num(c.minutes); minutes+=min;
+    const hr=num(c.hr);
+    if(hr){ const pct=hr/maxHr; if(pct>=0.76) vigorous+=min; else if(pct>=0.64) moderate+=min; else easy+=min; }
+    else if(String(c.type||'').toLowerCase().includes('run')) vigorous+=min; else easy+=min;
+  });
+  return {minutes,moderate,vigorous,easy,maxHr,healthMinutes:moderate+vigorous*2};
+}
+function renderCoach(){
+  const body=bodyReadinessContext();
+  const muscles=allMuscles().map(muscleReadiness).sort((a,b)=>b.score-a.score);
+  const ready=muscles.filter(m=>m.score>=70).slice(0,5), avoid=muscles.filter(m=>m.score<60).slice(0,5);
+  const cardio=weeklyCardioSummary();
+  const warnings=coachWarnings();
+  const cls=body.score>=75?'good':body.score>=55?'warn':'bad';
+  return `<div class="grid cols3"><div class="card"><div class="muted small">Overall readiness</div><div class="coach-score score ${cls}">${body.score}</div><div class="muted">${esc(body.label)}</div><div class="split"></div><div class="small muted">${esc(body.note)}</div></div><div class="card"><h3>Train today</h3>${ready.length?ready.map(m=>`<div class="between small"><span>${esc(m.muscle)}</span><span class="pill good">${m.score}/100 ${esc(m.label)}</span></div>`).join(''):'<p class="muted">Log more sessions first.</p>'}</div><div class="card"><h3>Be careful</h3>${avoid.length?avoid.map(m=>`<div class="between small"><span>${esc(m.muscle)}</span><span class="pill bad">${m.score}/100 ${esc(m.label)}</span></div>`).join(''):'<p class="muted">No obvious red flags.</p>'}</div></div>
+  <div class="grid cols2" style="margin-top:16px"><div class="card"><h3>Weekly muscle load</h3><div class="tablewrap"><table><tr><th>Muscle</th><th>7d sets</th><th>28d sets</th><th>Last hit</th><th>Readiness</th></tr>${muscles.map(m=>`<tr><td>${esc(m.muscle)}</td><td>${m.s7.sets}</td><td>${m.s28.sets}</td><td>${m.s7.lastDate?fmtDate(m.s7.lastDate):'-'}</td><td><div class="meter ${m.score>=75?'good':m.score>=55?'warn':'bad'}"><span style="width:${m.score}%"></span></div><div class="small muted">${m.score}/100 · ${esc(m.note)}</div></td></tr>`).join('')}</table></div></div><div class="card"><h3>Warnings / deload signals</h3>${warnings.length?warnings.map(w=>`<p class="flag small">${esc(w)}</p>`).join(''):'<p class="muted">No major spikes detected. Keep logging RPE/sleep for better judgement.</p>'}<div class="split"></div><h3>Weekly cardio health</h3><p class="muted small">${Math.round(cardio.minutes)} total min · ${Math.round(cardio.moderate)} moderate · ${Math.round(cardio.vigorous)} vigorous · max HR estimate ${Math.round(cardio.maxHr)} bpm.</p><div class="meter ${cardio.healthMinutes>=150?'good':cardio.healthMinutes>=90?'warn':'bad'}"><span style="width:${Math.min(100,cardio.healthMinutes/150*100)}%"></span></div><p class="muted small">Health-min score counts moderate minutes + 2× vigorous minutes toward a 150-min weekly baseline.</p></div></div>`;
+}
+function renderMethods(){
+  return `<div class="grid cols2"><div class="card method-card"><h3>Strength calculations</h3><table><tr><th>Metric</th><th>Formula used</th></tr><tr><td>Set volume</td><td><code>weight × reps</code></td></tr><tr><td>Session volume</td><td><code>Σ(weight × reps) for completed sets</code></td></tr><tr><td>Estimated 1RM</td><td><code>weight × (1 + reps / 30)</code></td></tr><tr><td>Double progression</td><td>Add reps until top work sets reach the target range; then add the exercise increment and rebuild from the lower end.</td></tr><tr><td>Over-time goal</td><td>Compares current top-set reps with max target reps, then gives a 4-week total-rep or load-up aim.</td></tr></table></div><div class="card method-card"><h3>Recovery / live fatigue</h3><table><tr><th>Metric</th><th>Rule used</th></tr><tr><td>Muscle recovery</td><td>Starts at 100, subtracts for same-area training &lt;24h, 24–48h, 48–72h, high 7d sets, high RPE, and low body readiness.</td></tr><tr><td>Live session fatigue</td><td>Subtracts for same-area sets, same-area volume, total sets, superset sets, then adds a small bonus if that area has rested 15+ min.</td></tr><tr><td>Today target</td><td>Uses the lower of recovery score and live fatigue score: 90+ stretch, 75–89 best, 60–74 safe, &lt;60 repeat/reduce.</td></tr><tr><td>Body readiness</td><td>Starts at 100 and subtracts for low sleep, low energy, soreness, stress, and very low protein if logged.</td></tr></table></div></div><div class="card" style="margin-top:16px"><h3>Evidence notes built into the model</h3><p class="muted">Forge uses evidence-backed concepts, but the exact readiness score is a practical heuristic, not a medical/injury prediction model. The app is designed to nudge better decisions: track volume, avoid huge spikes, respect sleep/recovery, and use RPE/RIR instead of forcing progression every session.</p><div class="row"><span class="pill">WHO activity target</span><span class="pill">ACSM progression</span><span class="pill">RPE/RIR autoregulation</span><span class="pill">Weekly set volume</span><span class="pill">HR intensity zones</span><span class="pill">Sleep/recovery</span></div></div>`;
+}
+
 function renderDashboard(){
   const st = overallStats(); const targets = allExerciseIdsWithLogs().map(id=>targetFor(id)).sort((a,b)=>b.score-a.score).slice(0,5);
   const weekVol = volumeByWeek().slice(-8);
@@ -371,7 +564,7 @@ function renderNext(){
   const ids = allExerciseIdsWithLogs(); const targets = ids.map(id=>targetFor(id)).sort((a,b)=>b.score-a.score);
   const load = recentMuscleLoad();
   const no = db.exercises.filter(e=>!ids.includes(e.id)).slice(0,12);
-  return `<div class="card"><h3>Next session aim — now with overtime + stacking</h3><p class="muted">Forge now judges the next target from your latest top sets, long-term trend, rep range, whether the exercise was late in the workout, and whether it was supersetted or stacked after similar muscles.</p><div class="row">${load.length?load.slice(0,6).map(x=>`<span class="pill">Last workout: ${esc(x.muscle)} ${Math.round(x.volume)}kg</span>`).join(''):'<span class="pill">No recent muscle load yet</span>'}</div></div><div class="grid cols2" style="margin-top:16px">${targets.map(t=>`<div class="card"><div class="between"><h3>${esc(t.name)}</h3><span class="pill ${t.confidence==='low'?'warn':'good'}">${t.confidence} confidence</span></div><div class="row"><span class="pill">${esc(t.status)}</span><span class="pill">Range ${t.range.min}–${t.range.max}</span><span class="pill">Last ${t.last ? fmtDate(t.last.date) : '-'}</span>${t.last&&t.last.groupId?`<span class="group-badge">Superset ${esc(t.last.groupId)}</span>`:''}</div><div class="split"></div><table><tr><th>Rank</th><th>Target</th></tr><tr><td><span class="score good">Best</span></td><td>${esc(t.best)}</td></tr><tr><td><span class="score">Safe</span></td><td>${esc(t.safe)}</td></tr><tr><td><span class="score warn">Stretch</span></td><td>${esc(t.stretch)}</td></tr><tr><td><span class="score bad">Worst</span></td><td>${esc(t.avoid)}</td></tr><tr><td><span class="score">Over time</span></td><td>${esc(t.overtime)}</td></tr></table><p class="muted small">Why: ${esc(t.reason)}</p><button class="btn" data-pick-progress="${t.exerciseId}">See progression</button></div>`).join('') || `<div class="card"><p class="muted">No logged exercises yet.</p></div>`}</div>${no.length? `<div class="card" style="margin-top:16px"><h3>No data yet</h3><p class="muted">These are ready in the 200-exercise library but not logged yet: ${no.map(e=>esc(e.name)).join(', ')}.</p></div>`:''}`;
+  return `<div class="card"><h3>Next session aim — now with overtime + stacking</h3><p class="muted">Forge now judges the next target from your latest top sets, long-term trend, rep range, whether the exercise was late in the workout, and whether it was supersetted or stacked after similar muscles.</p><div class="row">${load.length?load.slice(0,6).map(x=>`<span class="pill">Last workout: ${esc(x.muscle)} ${Math.round(x.volume)}kg</span>`).join(''):'<span class="pill">No recent muscle load yet</span>'}</div></div><div class="grid cols2" style="margin-top:16px">${targets.map(t=>`<div class="card"><div class="between"><h3>${esc(t.name)}</h3><span class="pill ${t.confidence==='low'?'warn':'good'}">${t.confidence} confidence</span></div><div class="row"><span class="pill">${esc(t.status)}</span><span class="pill">Range ${t.range.min}–${t.range.max}</span><span class="pill">Last ${t.last ? fmtDate(t.last.date) : '-'}</span>${t.last&&t.last.groupId?`<span class="group-badge">Superset ${esc(t.last.groupId)}</span>`:''}${t.recovery?`<span class="pill">Recovery ${t.recovery.score}/100 · ${esc(t.recovery.label)}</span>`:''}</div><div class="split"></div><table><tr><th>Rank</th><th>Target</th></tr><tr><td><span class="score good">Best</span></td><td>${esc(t.best)}</td></tr><tr><td><span class="score">Safe</span></td><td>${esc(t.safe)}</td></tr><tr><td><span class="score warn">Stretch</span></td><td>${esc(t.stretch)}</td></tr><tr><td><span class="score bad">Worst</span></td><td>${esc(t.avoid)}</td></tr><tr><td><span class="score">Today</span></td><td>${esc(adjustedTargetForToday(t).label)}: ${esc(adjustedTargetForToday(t).target)}</td></tr><tr><td><span class="score">Over time</span></td><td>${esc(t.overtime)}</td></tr></table><p class="muted small">Why: ${esc(t.reason)}</p><button class="btn" data-pick-progress="${t.exerciseId}">See progression</button></div>`).join('') || `<div class="card"><p class="muted">No logged exercises yet.</p></div>`}</div>${no.length? `<div class="card" style="margin-top:16px"><h3>No data yet</h3><p class="muted">These are ready in the 200-exercise library but not logged yet: ${no.map(e=>esc(e.name)).join(', ')}.</p></div>`:''}`;
 }
 function renderProgress(){
   const logged = allExerciseIdsWithLogs(); const all = db.exercises.map(e=>e.id); if(!all.includes(selectedExercise)) selectedExercise = logged[0] || all[0];
@@ -395,7 +588,7 @@ function repRecordTable(entries){
 }
 function renderLog(){
   const a = db.activeSession;
-  if(!a) return `<div class="grid cols2"><div class="card"><h3>Start workout</h3><div class="field"><label>Workout name</label><input id="newWorkoutName" value="${new Date().toLocaleDateString(undefined,{weekday:'short'})}"></div><div class="field"><label>Template</label><select id="templateSelect"><option value="">Empty workout</option>${db.templates.map(t=>`<option value="${t.id}">${esc(t.name)}</option>`).join('')}</select></div><button class="btn primary" id="startWorkout">Start</button></div><div class="card"><h3>Smarter logging</h3><p class="muted">When you add an exercise, Forge shows your previous sets and what to aim for next. Log RPE when you can — it makes future recommendations less dumb.</p><div class="row"><span class="pill">Previous sets</span><span class="pill">Targets</span><span class="pill">Rest timer</span><span class="pill">Set types</span></div></div></div>`;
+  if(!a) return `<div class="grid cols2"><div class="card"><h3>Start workout</h3><div class="field"><label>Workout name</label><input id="newWorkoutName" value="${new Date().toLocaleDateString(undefined,{weekday:'short'})}"></div><div class="field"><label>Template</label><select id="templateSelect"><option value="">Empty workout</option>${db.templates.map(t=>`<option value="${t.id}">${esc(t.name)}</option>`).join('')}</select></div><button class="btn primary" id="startWorkout">Start</button></div><div class="card"><h3>Smarter logging</h3><p class="muted">When you add an exercise, Forge now recalculates today's target from past logs, days since similar muscles were trained, sleep/RPE when logged, and what you have already completed earlier in the same session.</p><div class="row"><span class="pill">Previous sets</span><span class="pill">Live fatigue</span><span class="pill">Recovery score</span><span class="pill">Superset context</span><span class="pill">Rest timer</span></div></div></div>`;
   return `<div class="card"><div class="between"><div><h3>${esc(a.name)}</h3><div class="muted small">Started ${new Date(a.start).toLocaleString()} · Put exercises in the same Superset group to pair them.</div></div><div class="row"><button class="btn" id="addExerciseBtn">Add exercise</button><button class="btn" id="saveActiveTemplate">Save as template</button><button class="btn primary" id="finishWorkout">Finish workout</button></div></div></div><div id="activeExercises">${(a.exercises||[]).map(activeExerciseCard).join('')}</div><div class="sticky-bottom"><div class="card between"><div><strong>Rest timer</strong><div id="timerText" class="muted">${restTimer.left?clock(restTimer.left):'Ready'}</div></div><div class="row"><button class="btn" data-rest="60">60s</button><button class="btn" data-rest="120">120s</button><button class="btn" data-rest="180">180s</button><button class="btn bad" id="stopTimer">Stop</button></div></div></div>`;
 }
 function groupOptions(value=''){
@@ -403,8 +596,11 @@ function groupOptions(value=''){
 }
 function activeExerciseCard(ex, i){
   const t = targetFor(ex.exerciseId); const sticky = exById(ex.exerciseId).sticky; const group = ex.groupId || '';
+  const todayTarget = adjustedTargetForToday(t, i);
   const partners = group && db.activeSession ? db.activeSession.exercises.filter((x,idx)=>idx!==i && x.groupId===group).map(x=>x.name||findExerciseName(x.exerciseId)) : [];
-  return `<div class="exercise-card" data-ex-index="${i}"><div class="between"><div><strong>${esc(ex.name||findExerciseName(ex.exerciseId))}</strong> ${group?`<span class="group-badge">Superset ${esc(group)}</span>`:''}<div class="muted small">Target: ${esc(ex.target||`${t.range.min}–${t.range.max}`)} · Rest ${ex.rest||db.settings.defaultRest}s ${partners.length?`· paired with ${partners.map(esc).join(', ')}`:''}</div></div><button class="btn bad" data-remove-ex="${i}">Remove</button></div><div class="fields three" style="margin-top:8px"><div class="field"><label>Superset group</label><select data-ex-group="${i}">${groupOptions(group)}</select></div><div class="field"><label>Target</label><input data-ex-meta="${i},target" value="${esc(ex.target||'')}"></div><div class="field"><label>Rest sec</label><input data-ex-meta="${i},rest" type="number" value="${ex.rest||db.settings.defaultRest}"></div></div>${sticky?`<div class="warnbox small" style="margin-top:8px">Sticky note: ${esc(sticky)}</div>`:''}<div class="goodbox small" style="margin-top:8px"><strong>Next aim:</strong> ${esc(t.best)}<br><span class="muted">${esc(t.reason)}</span><br><span class="muted">${esc(t.overtime)}</span></div><div>${(ex.sets||[]).map((s,j)=>setRow(s,i,j)).join('')}</div><div class="row"><button class="btn" data-add-set="${i}">+ set</button><button class="btn" data-copy-prev="${i}">Copy previous</button><button class="btn" data-start-rest="${ex.rest||db.settings.defaultRest}">Start rest</button></div></div>`;
+  const live = todayTarget.live;
+  const recovery = todayTarget.recovery;
+  return `<div class="exercise-card" data-ex-index="${i}"><div class="between"><div><strong>${esc(ex.name||findExerciseName(ex.exerciseId))}</strong> ${group?`<span class="group-badge">Superset ${esc(group)}</span>`:''}<div class="muted small">Target: ${esc(ex.target||`${t.range.min}–${t.range.max}`)} · Rest ${ex.rest||db.settings.defaultRest}s ${partners.length?`· paired with ${partners.map(esc).join(', ')}`:''}</div></div><button class="btn bad" data-remove-ex="${i}">Remove</button></div><div class="fields three" style="margin-top:8px"><div class="field"><label>Superset group</label><select data-ex-group="${i}">${groupOptions(group)}</select></div><div class="field"><label>Target</label><input data-ex-meta="${i},target" value="${esc(ex.target||'')}"></div><div class="field"><label>Rest sec</label><input data-ex-meta="${i},rest" type="number" value="${ex.rest||db.settings.defaultRest}"></div></div>${sticky?`<div class="warnbox small" style="margin-top:8px">Sticky note: ${esc(sticky)}</div>`:''}<div class="${todayTarget.cls} small" style="margin-top:8px"><strong>Today adjusted:</strong> ${esc(todayTarget.label)} — ${esc(todayTarget.target)}<br><span class="muted">Combined readiness ${todayTarget.combined}/100. ${esc(todayTarget.rule)}</span><br><span class="muted">Recovery: ${recovery.score}/100 ${esc(recovery.label)} — ${esc(recovery.note)}</span>${live?`<br><span class="muted">Live session: ${live.score}/100 ${esc(live.label)} — ${esc(live.note)}</span>`:''}</div><div class="goodbox small" style="margin-top:8px"><strong>Base next aim:</strong> ${esc(t.best)}<br><span class="muted">${esc(t.reason)}</span><br><span class="muted">${esc(t.overtime)}</span></div><div>${(ex.sets||[]).map((s,j)=>setRow(s,i,j)).join('')}</div><div class="row"><button class="btn" data-add-set="${i}">+ set</button><button class="btn" data-copy-prev="${i}">Copy previous</button><button class="btn" data-start-rest="${ex.rest||db.settings.defaultRest}">Start rest</button></div></div>`;
 }
 function setRow(s,i,j){ return `<div class="set-row"><div class="numtag">${j+1}</div><input data-set="${i},${j},weight" type="number" step="0.5" placeholder="kg" value="${esc(s.weight)}"><input data-set="${i},${j},reps" type="number" placeholder="reps" value="${esc(s.reps)}"><input data-set="${i},${j},rpe" type="number" step="0.5" placeholder="RPE" value="${esc(s.rpe)}"><select data-set="${i},${j},type"><option ${s.type==='working'?'selected':''}>working</option><option ${s.type==='warmup'?'selected':''}>warmup</option><option ${s.type==='drop'?'selected':''}>drop</option><option ${s.type==='failure'?'selected':''}>failure</option></select><button class="btn ${s.done?'good':''}" data-toggle-set="${i},${j}">${s.done?'✓':'○'}</button></div>`; }
 function renderHistory(){
@@ -452,8 +648,8 @@ function renderCardio(){
   return `<div class="grid cols2"><div class="card"><h3>Add cardio</h3><div class="fields two"><div class="field"><label>Date</label><input id="cardioDate" type="date" value="${today()}"></div><div class="field"><label>Type</label><select id="cardioType"><option>Run</option><option>Bike</option><option>Walk</option><option>Other</option></select></div><div class="field"><label>Distance km</label><input id="cardioDist" type="number" step="0.01"></div><div class="field"><label>Minutes</label><input id="cardioMin" type="number" step="0.1"></div><div class="field"><label>Avg HR</label><input id="cardioHr" type="number"></div><div class="field"><label>Notes</label><input id="cardioNotes"></div></div><button class="btn primary" id="addCardio" style="margin-top:10px">Add</button></div><div class="card"><h3>Cardio notes</h3><p class="muted">For your running goal, log distance, time, HR, sleep, and whether it felt easy. The app can later compare pace at similar HR.</p></div></div><div class="card" style="margin-top:16px"><h3>Cardio history</h3><div class="tablewrap"><table><tr><th>Date</th><th>Type</th><th>Distance</th><th>Time</th><th>Pace</th><th>HR</th><th>Notes</th><th></th></tr>${rows}</table></div></div>`;
 }
 function renderBody(){
-  const rows = [...db.body].sort((a,b)=>String(b.date).localeCompare(String(a.date))).map(b=>`<tr><td>${fmtDate(b.date)}</td><td>${b.weight||''}</td><td>${b.sleep||''}</td><td>${b.steps||''}</td><td>${esc(b.notes||'')}</td><td><button class="btn bad" data-del-body="${b.id}">Delete</button></td></tr>`).join('');
-  return `<div class="grid cols2"><div class="card"><h3>Add body/recovery</h3><div class="fields two"><div class="field"><label>Date</label><input id="bodyDate" type="date" value="${today()}"></div><div class="field"><label>Weight kg</label><input id="bodyWeight" type="number" step="0.1"></div><div class="field"><label>Sleep hours</label><input id="bodySleep" type="number" step="0.1"></div><div class="field"><label>Steps</label><input id="bodySteps" type="number"></div></div><div class="field"><label>Notes</label><textarea id="bodyNotes" placeholder="sore? bad sleep? exams?"></textarea></div><button class="btn primary" id="addBody">Add</button></div><div class="card"><h3>Body trend</h3><canvas id="bodyChart" class="chart mini-chart"></canvas></div></div><div class="card" style="margin-top:16px"><h3>Body history</h3><table><tr><th>Date</th><th>Weight</th><th>Sleep</th><th>Steps</th><th>Notes</th><th></th></tr>${rows}</table></div>`;
+  const rows = [...db.body].sort((a,b)=>String(b.date).localeCompare(String(a.date))).map(b=>`<tr><td>${fmtDate(b.date)}</td><td>${b.weight||''}</td><td>${b.sleep||''}</td><td>${b.energy||''}</td><td>${b.soreness||''}</td><td>${b.stress||''}</td><td>${b.protein||''}</td><td>${esc(b.notes||'')}</td><td><button class="btn bad" data-del-body="${b.id}">Delete</button></td></tr>`).join('');
+  return `<div class="grid cols2"><div class="card"><h3>Add body/recovery check-in</h3><div class="fields two"><div class="field"><label>Date</label><input id="bodyDate" type="date" value="${today()}"></div><div class="field"><label>Weight kg</label><input id="bodyWeight" type="number" step="0.1"></div><div class="field"><label>Sleep hours</label><input id="bodySleep" type="number" step="0.1"></div><div class="field"><label>Energy 1–5</label><input id="bodyEnergy" type="number" min="1" max="5"></div><div class="field"><label>Soreness 1–5</label><input id="bodySoreness" type="number" min="1" max="5"></div><div class="field"><label>Stress 1–5</label><input id="bodyStress" type="number" min="1" max="5"></div><div class="field"><label>Protein g</label><input id="bodyProtein" type="number"></div><div class="field"><label>Calories</label><input id="bodyCalories" type="number"></div><div class="field"><label>Steps</label><input id="bodySteps" type="number"></div></div><div class="field"><label>Notes</label><textarea id="bodyNotes" placeholder="sore? bad sleep? exams? hungry? motivation?"></textarea></div><button class="btn primary" id="addBody">Add check-in</button></div><div class="card"><h3>Body trend</h3><canvas id="bodyChart" class="chart mini-chart"></canvas><div class="split"></div><h3>Latest readiness</h3><p class="muted small">${esc(bodyReadinessContext().note)}</p><div class="meter ${bodyReadinessContext().score>=75?'good':bodyReadinessContext().score>=55?'warn':'bad'}"><span style="width:${bodyReadinessContext().score}%"></span></div></div></div><div class="card" style="margin-top:16px"><h3>Body/recovery history</h3><div class="tablewrap"><table><tr><th>Date</th><th>Weight</th><th>Sleep</th><th>Energy</th><th>Sore</th><th>Stress</th><th>Protein</th><th>Notes</th><th></th></tr>${rows}</table></div></div>`;
 }
 function cloudCfg(){
   db.settings.cloudSync = Object.assign({enabled:false,auto:true,autoPull:true,url:'',token:'',lastSync:'',lastError:'',lastPull:'',lastPullError:'',lastRemoteSavedAt:''}, db.settings.cloudSync||{});
@@ -594,7 +790,7 @@ async function pullLatestFromSheets(manual=false, reason='manual'){
 function renderSettings(){
   const bytes = new Blob([JSON.stringify(db)]).size;
   const backup = db.settings.lastBackupAt ? new Date(db.settings.lastBackupAt).toLocaleString() : 'never';
-  return `<div class="grid cols2"><div class="card"><h3>Storage explained</h3><div class="notice"><strong>Why data changes between browsers:</strong><br>Forge stores logs in this browser’s localStorage. Chrome, Edge, Safari, phone browser, and private tabs do not share the same saved data. Different file paths can also behave like different storage places.</div><p class="muted small">Current key: <span class="kbd">${APP_KEY}</span><br>Data size: ${Math.round(bytes/1024)} KB<br>Last manual backup: ${esc(backup)}</p><div class="row"><button class="btn primary" id="exportData">Export JSON backup</button><label class="btn">Import JSON<input id="importData" type="file" accept="application/json" hidden></label><button class="btn bad" id="wipeData">Wipe this browser</button></div></div><div class="card"><h3>Preferences</h3><div class="fields two"><div class="field"><label>Name</label><input id="setName" value="${esc(db.settings.name||'')}"></div><div class="field"><label>Theme</label><select id="setTheme"><option value="dark" ${db.settings.theme==='dark'?'selected':''}>dark</option><option value="light" ${db.settings.theme==='light'?'selected':''}>light</option></select></div><div class="field"><label>Default rest sec</label><input id="setRest" type="number" value="${db.settings.defaultRest||120}"></div><div class="field"><label>Default increment kg</label><input id="setInc" type="number" step="0.5" value="${db.settings.defaultIncrement||2.5}"></div></div><button class="btn primary" id="saveSettings" style="margin-top:10px">Save settings</button></div></div><div class="grid cols2" style="margin-top:16px">${sheetSyncCard()}<div class="card"><h3>Data safety</h3><p class="muted">Best setup: phone local storage for speed, Google Sheet mirror for easy viewing, and manual JSON exports for full restore.</p><div class="row"><span class="pill good">Local-first</span><span class="pill good">Optional Sheets mirror</span><span class="pill good">Manual JSON backup</span></div><p class="muted small">Do not put your secret token in GitHub. Only type it into this Settings page on your own phone.</p></div></div><div class="card" style="margin-top:16px"><h3>Feature checklist added</h3><div class="row"><span class="pill good">Individual exercise graphs</span><span class="pill good">Next targets</span><span class="pill good">Best / safe / stretch / avoid</span><span class="pill good">Rep records</span><span class="pill good">RPE field</span><span class="pill good">Set types</span><span class="pill good">Custom rep range</span><span class="pill good">Two-way Sheets sync</span><span class="pill good">200-exercise library</span><span class="pill good">Template builder</span><span class="pill good">Superset groups</span><span class="pill good">Overtime targets</span><span class="pill good">Stacking logic</span></div></div>`;
+  return `<div class="grid cols2"><div class="card"><h3>Storage explained</h3><div class="notice"><strong>Why data changes between browsers:</strong><br>Forge stores logs in this browser’s localStorage. Chrome, Edge, Safari, phone browser, and private tabs do not share the same saved data. Different file paths can also behave like different storage places.</div><p class="muted small">Current key: <span class="kbd">${APP_KEY}</span><br>Data size: ${Math.round(bytes/1024)} KB<br>Last manual backup: ${esc(backup)}</p><div class="row"><button class="btn primary" id="exportData">Export JSON backup</button><label class="btn">Import JSON<input id="importData" type="file" accept="application/json" hidden></label><button class="btn bad" id="wipeData">Wipe this browser</button></div></div><div class="card"><h3>Preferences</h3><div class="fields two"><div class="field"><label>Name</label><input id="setName" value="${esc(db.settings.name||'')}"></div><div class="field"><label>Theme</label><select id="setTheme"><option value="dark" ${db.settings.theme==='dark'?'selected':''}>dark</option><option value="light" ${db.settings.theme==='light'?'selected':''}>light</option></select></div><div class="field"><label>Default rest sec</label><input id="setRest" type="number" value="${db.settings.defaultRest||120}"></div><div class="field"><label>Default increment kg</label><input id="setInc" type="number" step="0.5" value="${db.settings.defaultIncrement||2.5}"></div><div class="field"><label>Age for HR zones</label><input id="setAge" type="number" value="${db.settings.age||18}"></div></div><button class="btn primary" id="saveSettings" style="margin-top:10px">Save settings</button></div></div><div class="grid cols2" style="margin-top:16px">${sheetSyncCard()}<div class="card"><h3>Data safety</h3><p class="muted">Best setup: phone local storage for speed, Google Sheet mirror for easy viewing, and manual JSON exports for full restore.</p><div class="row"><span class="pill good">Local-first</span><span class="pill good">Optional Sheets mirror</span><span class="pill good">Manual JSON backup</span></div><p class="muted small">Do not put your secret token in GitHub. Only type it into this Settings page on your own phone.</p></div></div><div class="card" style="margin-top:16px"><h3>Feature checklist added</h3><div class="row"><span class="pill good">Individual exercise graphs</span><span class="pill good">Next targets</span><span class="pill good">Best / safe / stretch / avoid</span><span class="pill good">Rep records</span><span class="pill good">RPE field</span><span class="pill good">Set types</span><span class="pill good">Custom rep range</span><span class="pill good">Two-way Sheets sync</span><span class="pill good">200-exercise library</span><span class="pill good">Template builder</span><span class="pill good">Superset groups</span><span class="pill good">Overtime targets</span><span class="pill good">Stacking logic</span><span class="pill good">Coach readiness</span><span class="pill good">Weekly muscle load</span><span class="pill good">Deload warnings</span><span class="pill good">Calculation methods</span></div></div>`;
 }
 function bind(){
   $('#quickLog').onclick=()=>{view='log';render()}; $('#quickExport').onclick=exportData; $('#menuBtn').onclick=()=>$('#side').classList.toggle('open');
@@ -620,8 +816,8 @@ function bindLog(){
   $$('[data-set]').forEach(inp=>inp.oninput=()=>{const [i,j,k]=inp.dataset.set.split(','); db.activeSession.exercises[i].sets[j][k]=inp.value; save();});
   $$('[data-ex-group]').forEach(sel=>sel.onchange=()=>{db.activeSession.exercises[+sel.dataset.exGroup].groupId=sel.value; save(); render();});
   $$('[data-ex-meta]').forEach(inp=>inp.oninput=()=>{const [i,k]=inp.dataset.exMeta.split(','); db.activeSession.exercises[+i][k]=k==='rest'?(num(inp.value)||db.settings.defaultRest):inp.value; save();});
-  $$('[data-toggle-set]').forEach(b=>b.onclick=()=>{const [i,j]=b.dataset.toggleSet.split(','); const s=db.activeSession.exercises[i].sets[j]; s.done=!s.done; save(); if(s.done) startRest(db.activeSession.exercises[i].rest||db.settings.defaultRest); render();});
-  $$('[data-add-set]').forEach(b=>b.onclick=()=>{const ex=db.activeSession.exercises[+b.dataset.addSet]; const last=ex.sets[ex.sets.length-1]||{}; ex.sets.push({id:uid(),weight:last.weight||'',reps:'',rpe:'',done:false,type:'working'}); save(); render();});
+  $$('[data-toggle-set]').forEach(b=>b.onclick=()=>{const [i,j]=b.dataset.toggleSet.split(','); const s=db.activeSession.exercises[i].sets[j]; s.done=!s.done; if(s.done){ s.completedAt = nowIso(); } else { s.completedAt = ''; } save(); if(s.done) startRest(db.activeSession.exercises[i].rest||db.settings.defaultRest); render();});
+  $$('[data-add-set]').forEach(b=>b.onclick=()=>{const ex=db.activeSession.exercises[+b.dataset.addSet]; const last=ex.sets[ex.sets.length-1]||{}; ex.sets.push({id:uid(),weight:last.weight||'',reps:'',rpe:'',done:false,type:'working',completedAt:''}); save(); render();});
   $$('[data-remove-ex]').forEach(b=>b.onclick=()=>{db.activeSession.exercises.splice(+b.dataset.removeEx,1); save(); render();});
   $$('[data-copy-prev]').forEach(b=>b.onclick=()=>copyPreviousIntoActive(+b.dataset.copyPrev));
   $$('[data-rest]').forEach(b=>b.onclick=()=>startRest(+b.dataset.rest)); $$('[data-start-rest]').forEach(b=>b.onclick=()=>startRest(+b.dataset.startRest)); const stop=$('#stopTimer'); if(stop) stop.onclick=stopRest;
@@ -632,7 +828,7 @@ function startWorkout(){
   if(tpl){ db.activeSession.name=tpl.name; db.activeSession.exercises = tpl.exercises.map(te => activeExFromId(te.exerciseId, te.target, te.rest, te.groupId)); }
   save(); render();
 }
-function activeExFromId(id, target='', rest=null, groupId=''){ const e=exById(id); const t=targetFor(id); const setsN = target && target.match(/^(\d+)/) ? +target.match(/^(\d+)/)[1] : 3; const sets = Array.from({length:Math.min(setsN||3,4)},()=>({id:uid(),weight:'',reps:'',rpe:'',done:false,type:'working'})); return {exerciseId:id,name:e.name,target:target||`${t.range.min}–${t.range.max}`,rest:rest||db.settings.defaultRest,groupId:groupId||'',sets}; }
+function activeExFromId(id, target='', rest=null, groupId=''){ const e=exById(id); const t=targetFor(id); const setsN = target && target.match(/^(\d+)/) ? +target.match(/^(\d+)/)[1] : 3; const sets = Array.from({length:Math.min(setsN||3,4)},()=>({id:uid(),weight:'',reps:'',rpe:'',done:false,type:'working',completedAt:''})); return {exerciseId:id,name:e.name,target:target||`${t.range.min}–${t.range.max}`,rest:rest||db.settings.defaultRest,groupId:groupId||'',sets}; }
 function openExercisePicker(){
   showModal(`<h3>Add exercise</h3><div class="searchbox"><input id="pickSearch" placeholder="Search exercise..."><div class="results" id="pickResults"></div></div><div class="split"></div><button class="btn" id="closeModal">Close</button>`);
   const search=$('#pickSearch'), results=$('#pickResults');
@@ -641,7 +837,7 @@ function openExercisePicker(){
 }
 function copyPreviousIntoActive(i){
   const ex = db.activeSession.exercises[i]; const entries=exerciseSessionEntries(ex.exerciseId); const last=entries[entries.length-1]; if(!last) return;
-  ex.sets = last.sets.map(s=>({id:uid(),weight:String(s.weight||''),reps:String(s.reps||''),rpe:'',done:false,type:'working'})); if(last.groupId) ex.groupId=last.groupId; save(); render();
+  ex.sets = last.sets.map(s=>({id:uid(),weight:String(s.weight||''),reps:String(s.reps||''),rpe:'',done:false,type:'working',completedAt:''})); if(last.groupId) ex.groupId=last.groupId; save(); render();
 }
 function finishWorkout(){
   if(!db.activeSession) return; db.activeSession.end=nowIso(); db.sessions.push(clone(db.activeSession)); db.activeSession=null; save(); maybeAutoSync('workout'); view='history'; render();
@@ -655,12 +851,12 @@ function showSession(id){ const s=db.sessions.find(x=>x.id===id); if(!s)return; 
 function bindExercises(){ $('#newExercise').onclick=()=>editExercise(); $$('[data-edit-ex]').forEach(b=>b.onclick=()=>editExercise(b.dataset.editEx)); }
 function editExercise(id){ const e = id ? exById(id) : {id:uid(),name:'',muscle:'',equipment:'',notes:'',goalMin:null,goalMax:null,increment:null,sticky:''}; showModal(`<h3>${id?'Edit':'New'} exercise</h3><div class="fields two"><div class="field"><label>Name</label><input id="exName" value="${esc(e.name)}"></div><div class="field"><label>Muscle</label><input id="exMuscle" value="${esc(e.muscle)}"></div><div class="field"><label>Equipment</label><input id="exEquip" value="${esc(e.equipment)}"></div><div class="field"><label>Increment kg</label><input id="exInc" type="number" step="0.5" value="${e.increment||''}"></div><div class="field"><label>Rep min</label><input id="exMin" type="number" value="${e.goalMin||''}"></div><div class="field"><label>Rep max</label><input id="exMax" type="number" value="${e.goalMax||''}"></div></div><div class="field"><label>Sticky note shown during workouts</label><textarea id="exSticky">${esc(e.sticky||'')}</textarea></div><div class="field"><label>Notes</label><textarea id="exNotes">${esc(e.notes||'')}</textarea></div><div class="row"><button class="btn primary" id="saveEx">Save</button><button class="btn" id="closeModal">Cancel</button></div>`); $('#closeModal').onclick=hideModal; $('#saveEx').onclick=()=>{ e.name=$('#exName').value||'Exercise'; e.muscle=$('#exMuscle').value; e.equipment=$('#exEquip').value; e.increment=num($('#exInc').value)||null; e.goalMin=num($('#exMin').value)||null; e.goalMax=num($('#exMax').value)||null; e.sticky=$('#exSticky').value; e.notes=$('#exNotes').value; if(!id) db.exercises.push(e); save(); hideModal(); render(); }; }
 function bindCardio(){ $('#addCardio').onclick=()=>{db.cardio.push({id:uid(),date:$('#cardioDate').value,type:$('#cardioType').value,distance:$('#cardioDist').value,minutes:$('#cardioMin').value,hr:$('#cardioHr').value,notes:$('#cardioNotes').value});save(); maybeAutoSync('cardio'); render();}; $$('[data-del-cardio]').forEach(b=>b.onclick=()=>{db.cardio=db.cardio.filter(c=>c.id!==b.dataset.delCardio);save(); maybeAutoSync('cardio delete'); render();}); }
-function bindBody(){ $('#addBody').onclick=()=>{db.body.push({id:uid(),date:$('#bodyDate').value,weight:$('#bodyWeight').value,sleep:$('#bodySleep').value,steps:$('#bodySteps').value,notes:$('#bodyNotes').value});save(); maybeAutoSync('body'); render();}; $$('[data-del-body]').forEach(b=>b.onclick=()=>{db.body=db.body.filter(c=>c.id!==b.dataset.delBody);save(); maybeAutoSync('body delete'); render();}); }
+function bindBody(){ $('#addBody').onclick=()=>{db.body.push({id:uid(),date:$('#bodyDate').value,weight:$('#bodyWeight').value,sleep:$('#bodySleep').value,energy:$('#bodyEnergy').value,soreness:$('#bodySoreness').value,stress:$('#bodyStress').value,protein:$('#bodyProtein').value,calories:$('#bodyCalories').value,steps:$('#bodySteps').value,notes:$('#bodyNotes').value});save(); maybeAutoSync('body'); render();}; $$('[data-del-body]').forEach(b=>b.onclick=()=>{db.body=db.body.filter(c=>c.id!==b.dataset.delBody);save(); maybeAutoSync('body delete'); render();}); }
 function bindSettings(){
   $('#exportData').onclick=exportData;
   $('#importData').onchange=importData;
   $('#wipeData').onclick=()=>{ if(confirm('Wipe Forge data in this browser? Export first if needed.')){ localStorage.removeItem(APP_KEY); db=clone(seed); save(); render(); } };
-  $('#saveSettings').onclick=()=>{db.settings.name=$('#setName').value; db.settings.theme=$('#setTheme').value; db.settings.defaultRest=num($('#setRest').value)||120; db.settings.defaultIncrement=num($('#setInc').value)||2.5; save(); render();};
+  $('#saveSettings').onclick=()=>{db.settings.name=$('#setName').value; db.settings.theme=$('#setTheme').value; db.settings.defaultRest=num($('#setRest').value)||120; db.settings.defaultIncrement=num($('#setInc').value)||2.5; db.settings.age=num($('#setAge').value)||18; save(); render();};
   const saveSync=$('#saveSyncSettings'); if(saveSync) saveSync.onclick=()=>{ const c=cloudCfg(); c.url=$('#syncUrl').value.trim(); c.token=$('#syncToken').value.trim(); c.enabled=$('#syncEnabled').checked; c.auto=$('#syncAuto').checked; c.autoPull=$('#syncAutoPull').checked; c.lastError=''; c.lastPullError=''; save(); alert('Sheets sync settings saved on this device only.'); render(); };
   const syncNow=$('#syncNow'); if(syncNow) syncNow.onclick=()=>{ const c=cloudCfg(); c.url=$('#syncUrl').value.trim(); c.token=$('#syncToken').value.trim(); c.enabled=$('#syncEnabled').checked; c.auto=$('#syncAuto').checked; c.autoPull=$('#syncAutoPull').checked; save(); syncAllToSheets(true, 'manual'); };
   const pullNow=$('#pullNow'); if(pullNow) pullNow.onclick=()=>{ const c=cloudCfg(); c.url=$('#syncUrl').value.trim(); c.token=$('#syncToken').value.trim(); c.enabled=$('#syncEnabled').checked; c.auto=$('#syncAuto').checked; c.autoPull=$('#syncAutoPull').checked; save(); pullLatestFromSheets(true, 'manual'); };

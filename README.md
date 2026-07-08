@@ -1,33 +1,42 @@
-# Forge Athlete — v7 Senior Build
+# Forge Athlete v9 — Comprehensive Coach Build
 
-Local-first workout tracker PWA with optional two-way Google Sheets sync.
+This is the comprehensive trainer version.
 
-## New in v7
+## New in v9
 
-- Expanded 200-exercise library with cleaned names for the user's current lifts.
-- Smarter next-target logic using last workout, rep range, trend, stacked exercise order, same-muscle fatigue, and superset context.
-- Overtime goals: the app gives a 4-week style progression aim, not only a next-session number.
-- Preset workout/template builder inside the app.
-- Superset groups A/B/C/D/E in both templates and live workout logging.
-- Save active workout or last finished workout as a reusable template.
+- Coach page: overall readiness, train-today suggestions, careful muscles, weekly muscle load, and deload flags.
+- Recovery check-ins: sleep, energy, soreness, stress, protein, calories, steps, notes.
+- Recovery now affects exercise targets, not only previous set performance.
+- Muscle readiness uses recent same-muscle sets, last-hit timing, recent RPE, and body readiness.
+- Cardio health-minutes estimate: moderate minutes + 2 × vigorous minutes.
+- Methods page: shows the actual formulas used by the app.
+- Keeps v8 live fatigue: same-muscle/superset sets already done during the current workout adjust today’s targets.
 
-## Files to upload to GitHub Pages
+## Core formulas
 
-Upload these to the root of the repo:
+- Set volume = weight × reps.
+- Session volume = sum of completed set volume.
+- Estimated 1RM = weight × (1 + reps / 30).
+- Today target = min(recovery score, live-session fatigue score).
+- Target bands: 90+ stretch, 75–89 best, 60–74 safe, <60 repeat/reduce.
+- Weekly cardio health-minutes = moderate minutes + 2 × vigorous minutes.
 
-- `index.html`
-- `manifest.json`
-- `sw.js`
-- `.nojekyll`
-- `README.md`
-- `icon-180.png`
-- `icon-192.png`
-- `icon-512.png`
+## Push to GitHub Pages
 
-Do not upload workout backup JSON files or any file containing your Google Sheets sync token.
+Upload these files to the root of your GitHub Pages repo:
 
-## Apps Script
+- index.html
+- manifest.json
+- sw.js
+- .nojekyll
+- README.md
+- icon-180.png
+- icon-192.png
+- icon-512.png
+- google-apps-script.gs
 
-Keep using `google-apps-script.gs` for the Google Sheets sync. The sync stores the whole Forge JSON, so the new template/superset fields are included automatically.
+Do not upload workout backup JSON files.
 
-After replacing website files, hard refresh the site once. On mobile, reopen the Home Screen app. If the old version is stuck, clear site data or change the `?v=forge-v7` start URL/cache version.
+## Important
+
+Readiness scoring is a coaching heuristic, not a medical diagnosis or injury prediction model. It is designed to make progression smarter by combining performance history, recent load, live fatigue, and recovery check-ins.
