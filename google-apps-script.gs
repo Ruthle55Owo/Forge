@@ -1,7 +1,7 @@
 /**
- * Forge Athlete v9.1 -> Google Sheets two-way sync
+ * Forge Athlete v9.4 -> Google Sheets two-way sync
  *
- * Fix for: Push works, Pull fails.
+ * Fix for: Push works, Pull fails on phone. Adds iframe pull fallback + visible app/backend diagnostics.
  *
  * The important change: the latest full Forge JSON is stored inside the same
  * spreadsheet in a chunked LatestBackup tab. Pull reads from that tab, so it
@@ -27,7 +27,13 @@ function doGet(e) {
   const p = (e && e.parameter) || {};
   try {
     if (p.action === 'ping') {
-      return output_({ ok: true, message: 'Forge sync backend is reachable.', at: new Date().toISOString() }, p.callback);
+      return output_({ ok: true, message: 'Forge sync backend is reachable.', version: 'v9.4', at: new Date().toISOString() }, p.callback);
+    }
+
+    if (p.action === 'pullFrame') {
+      if (p.token !== SECRET_TOKEN) return frameOutput_(p.pullId || '', { ok: false, error: 'Bad or missing token.' });
+      const latest = readLatestBackupFromSheet_();
+      return frameOutput_(p.pullId || '', { ok: true, savedAt: latest.savedAt || '', db: latest.db || null });
     }
 
     if (p.action === 'pullLatest') {
@@ -38,6 +44,7 @@ function doGet(e) {
 
     return output_({ ok: true, message: 'Forge Sheets Sync is running. Use action=pullLatest to pull.', at: new Date().toISOString() }, p.callback);
   } catch (err) {
+    if (p.action === 'pullFrame') return frameOutput_(p.pullId || '', { ok: false, error: errorText_(err) });
     return output_({ ok: false, error: errorText_(err) }, p.callback);
   }
 }
@@ -250,6 +257,16 @@ function flatMap_(arr, fn) {
 
 function errorText_(err) {
   return String(err && err.stack ? err.stack : err);
+}
+
+
+function frameOutput_(pullId, payload) {
+  const html = '<!doctype html><html><body><script>' +
+    'try{parent.postMessage({source:"forge-pull",pullId:' + JSON.stringify(String(pullId || '')) + ',payload:' + JSON.stringify(payload || {}) + '},"*");}catch(e){}' +
+    '</' + 'script></body></html>';
+  return HtmlService.createHtmlOutput(html)
+    .setTitle('Forge Pull')
+    .setXFrameOptionsMode(HtmlService.XFrameOptionsMode.ALLOWALL);
 }
 
 function output_(obj, callback) {

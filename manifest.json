@@ -1,8 +1,8 @@
 {
   "name": "Forge \u2014 Training Tracker",
   "short_name": "Forge",
-  "description": "Comprehensive local-first workout, recovery, progression and cardio tracker.",
-  "start_url": "./?v=v9_1_syncfix",
+  "description": "Comprehensive local-first workout, recovery, progression and cardio tracker. v9.4 pull diagnostics, version badge and fuzzy exercise search.",
+  "start_url": "./?v=v9_4_diagnostics_search",
   "scope": "./",
   "display": "standalone",
   "orientation": "portrait",

@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
-<title>Forge — Training Tracker</title>
+<title>Forge — Training Tracker v9.3</title>
 <meta name="theme-color" content="#070a12" />
 <meta name="apple-mobile-web-app-capable" content="yes" />
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
@@ -47,10 +47,10 @@ input,select,textarea{width:100%;border:1px solid var(--line);background:var(--p
 <body>
 <div class="app" id="app">
   <aside class="side" id="side">
-    <div class="brand"><div class="logo"></div><div><h1>Forge Athlete</h1><p>two-way synced training log</p></div></div>
+    <div class="brand"><div class="logo"></div><div><h1>Forge Athlete</h1><p>two-way synced training log</p><p class="small muted" id="buildBadge">Build v9.3 Pull + Version Fix</p></div></div>
     <div class="notice small">Local-first. Optional two-way Google Sheets sync in Settings.</div>
     <nav class="nav" id="nav"></nav>
-    <div class="footer-note">Storage key: <span class="kbd">forge_fitness_tracker_v5</span></div>
+    <div class="footer-note">Build: <span class="kbd">v9.3 Pull + Version Fix</span><br>Storage key: <span class="kbd">forge_fitness_tracker_v5</span></div>
   </aside>
   <main class="main">
     <div class="topbar"><div><button class="btn mobile-menu" id="menuBtn">☰</button><h2 id="pageTitle">Dashboard</h2><div class="sub" id="pageSub">Training overview</div></div><div class="row"><button class="btn" id="quickExport">Export</button><button class="btn primary" id="quickLog">Start workout</button></div></div>
@@ -63,6 +63,9 @@ input,select,textarea{width:100%;border:1px solid var(--line);background:var(--p
 (() => {
 'use strict';
 const APP_KEY = 'forge_fitness_tracker_v5';
+const APP_VERSION = 'v9.4 Pull Diagnostics + Fuzzy Search';
+const APP_BUILD_DATE = '2026-07-09';
+const versionBadgeEl = document.getElementById('appVersionBadge'); if(versionBadgeEl) versionBadgeEl.textContent = APP_VERSION;
 const OLD_KEYS = ['forge_fitness_tracker_v4','forge_fitness_tracker_v3','hevy_local_tracker_v2'];
 const VIEW_KEY = 'forge_active_view_v5';
 const $ = (s, root=document) => root.querySelector(s);
@@ -674,7 +677,7 @@ function renderBody(){
   return `<div class="grid cols2"><div class="card"><h3>Add body/recovery check-in</h3><div class="fields two"><div class="field"><label>Date</label><input id="bodyDate" type="date" value="${today()}"></div><div class="field"><label>Weight kg</label><input id="bodyWeight" type="number" step="0.1"></div><div class="field"><label>Sleep hours</label><input id="bodySleep" type="number" step="0.1"></div><div class="field"><label>Energy 1–5</label><input id="bodyEnergy" type="number" min="1" max="5"></div><div class="field"><label>Soreness 1–5</label><input id="bodySoreness" type="number" min="1" max="5"></div><div class="field"><label>Stress 1–5</label><input id="bodyStress" type="number" min="1" max="5"></div><div class="field"><label>Protein g</label><input id="bodyProtein" type="number"></div><div class="field"><label>Calories</label><input id="bodyCalories" type="number"></div><div class="field"><label>Steps</label><input id="bodySteps" type="number"></div></div><div class="field"><label>Notes</label><textarea id="bodyNotes" placeholder="sore? bad sleep? exams? hungry? motivation?"></textarea></div><button class="btn primary" id="addBody">Add check-in</button></div><div class="card"><h3>Body trend</h3><canvas id="bodyChart" class="chart mini-chart"></canvas><div class="split"></div><h3>Latest readiness</h3><p class="muted small">${esc(bodyReadinessContext().note)}</p><div class="meter ${bodyReadinessContext().score>=75?'good':bodyReadinessContext().score>=55?'warn':'bad'}"><span style="width:${bodyReadinessContext().score}%"></span></div></div></div><div class="card" style="margin-top:16px"><h3>Body/recovery history</h3><div class="tablewrap"><table><tr><th>Date</th><th>Weight</th><th>Sleep</th><th>Energy</th><th>Sore</th><th>Stress</th><th>Protein</th><th>Notes</th><th></th></tr>${rows}</table></div></div>`;
 }
 function cloudCfg(){
-  db.settings.cloudSync = Object.assign({enabled:false,auto:true,autoPull:true,url:'',token:'',lastSync:'',lastError:'',lastPull:'',lastPullError:'',lastRemoteSavedAt:''}, db.settings.cloudSync||{});
+  db.settings.cloudSync = Object.assign({enabled:false,auto:true,autoPull:true,url:'',token:'',lastSync:'',lastError:'',lastPull:'',lastPullError:'',lastRemoteSavedAt:'',lastDiagnostic:'',lastPullMethod:''}, db.settings.cloudSync||{});
   return db.settings.cloudSync;
 }
 function dataSummary(d){
@@ -751,7 +754,7 @@ function sheetSyncCard(){
   const enabled = c.enabled ? 'checked' : '';
   const auto = c.auto !== false ? 'checked' : '';
   const autoPull = c.autoPull !== false ? 'checked' : '';
-  return `<div class="card"><h3>Google Sheets two-way sync</h3><div class="notice"><strong>Local-first + shared cloud brain:</strong><br>Forge saves to this device instantly. If enabled, it pulls the newest cloud backup on open and pushes a full copy after saved logs.</div><div class="fields"><div class="field"><label>Apps Script Web App URL</label><input id="syncUrl" placeholder="https://script.google.com/macros/s/.../exec" value="${esc(c.url||'')}"></div><div class="field"><label>Secret token</label><input id="syncToken" placeholder="same token as your Apps Script" value="${esc(c.token||'')}"></div></div><div class="row" style="margin-top:10px"><label class="pill"><input id="syncEnabled" type="checkbox" ${enabled}> Enable Sheets sync</label><label class="pill"><input id="syncAuto" type="checkbox" ${auto}> Auto-push after saved logs</label><label class="pill"><input id="syncAutoPull" type="checkbox" ${autoPull}> Auto-pull on open</label></div><p class="muted small">${esc(cloudSyncStatusText())}<br>Phone and laptop are separate local copies, but both can pull/push through the same Sheet backup.</p><div class="row"><button class="btn primary" id="saveSyncSettings">Save sync settings</button><button class="btn good" id="pullNow">Pull latest now</button><button class="btn good" id="syncNow">Push all data now</button><button class="btn" id="copyScriptHelp">Setup steps</button></div></div>`;
+  return `<div class="card"><h3>Google Sheets two-way sync</h3><div class="notice"><strong>Local-first + shared cloud brain:</strong><br>Forge saves to this device instantly. If enabled, it pulls the newest cloud backup on open and pushes a full copy after saved logs.<br><span class="muted small">App build: ${esc(APP_VERSION)}</span></div><div class="fields"><div class="field"><label>Apps Script Web App URL</label><input id="syncUrl" placeholder="https://script.google.com/macros/s/.../exec" value="${esc(c.url||'')}"></div><div class="field"><label>Secret token</label><input id="syncToken" placeholder="same token as your Apps Script" value="${esc(c.token||'')}"></div></div><div class="row" style="margin-top:10px"><label class="pill"><input id="syncEnabled" type="checkbox" ${enabled}> Enable Sheets sync</label><label class="pill"><input id="syncAuto" type="checkbox" ${auto}> Auto-push after saved logs</label><label class="pill"><input id="syncAutoPull" type="checkbox" ${autoPull}> Auto-pull on open</label></div><p class="muted small">${esc(cloudSyncStatusText())}<br>Last pull method: ${esc(c.lastPullMethod||'-')}<br>Last diagnostic: ${esc(c.lastDiagnostic||'-')}<br>Phone and laptop are separate local copies, but both can pull/push through the same Sheet backup.</p><div class="row"><button class="btn primary" id="saveSyncSettings">Save sync settings</button><button class="btn good" id="pullNow">Pull latest now</button><button class="btn good" id="syncNow">Push all data now</button><button class="btn warn" id="syncDiagnostics">Run diagnostics</button><button class="btn" id="openPullUrl">Open pull URL</button><button class="btn" id="copyScriptHelp">Setup steps</button></div></div>`;
 }
 function maybeAutoSync(reason){
   const c = cloudCfg();
@@ -790,29 +793,109 @@ function jsonp(url, params={}, timeoutMs=14000){
     document.body.appendChild(script);
   });
 }
+function iframePull(url, params={}, timeoutMs=18000){
+  return new Promise((resolve,reject)=>{
+    const pullId = 'forgeFrame_' + Date.now() + '_' + Math.random().toString(36).slice(2);
+    const qs = Object.entries(Object.assign({}, params, {action:'pullFrame', pullId})).map(([k,v])=>encodeURIComponent(k)+'='+encodeURIComponent(v==null?'':v)).join('&');
+    const src = url + (url.includes('?')?'&':'?') + qs;
+    const iframe = document.createElement('iframe');
+    iframe.style.position='fixed'; iframe.style.left='-9999px'; iframe.style.top='-9999px'; iframe.style.width='1px'; iframe.style.height='1px'; iframe.style.opacity='0';
+    const timer = setTimeout(()=>{ cleanup(); reject(new Error('Frame pull timed out. Apps Script may not have the v9.3 pullFrame code deployed.')); }, timeoutMs);
+    function cleanup(){ clearTimeout(timer); window.removeEventListener('message', onMsg); if(iframe.parentNode) iframe.parentNode.removeChild(iframe); }
+    function onMsg(event){
+      const data = event.data || {};
+      if(!data || data.source !== 'forge-pull' || data.pullId !== pullId) return;
+      cleanup();
+      resolve(data.payload);
+    }
+    window.addEventListener('message', onMsg);
+    iframe.onerror = () => { cleanup(); reject(new Error('Could not load pull iframe.'))};
+    iframe.src = src;
+    document.body.appendChild(iframe);
+  });
+}
+async function pullWithFallbacks(c, reason){
+  let firstErr = '';
+  try{
+    const res = await jsonp(c.url, {action:'pullLatest', token:c.token, reason, at:nowIso(), build:APP_VERSION}, 14000);
+    c.lastPullMethod = 'jsonp';
+    return res;
+  }catch(err){
+    firstErr = err && err.message ? err.message : String(err);
+  }
+  try{
+    const res = await iframePull(c.url, {token:c.token, reason, at:nowIso(), build:APP_VERSION}, 18000);
+    c.lastPullMethod = 'iframe';
+    return res;
+  }catch(err){
+    const secondErr = err && err.message ? err.message : String(err);
+    throw new Error('JSONP failed: ' + firstErr + ' | iframe failed: ' + secondErr);
+  }
+}
+
 async function pullLatestFromSheets(manual=false, reason='manual'){
   const c = cloudCfg();
   if(!c.url || !c.token){ if(manual) alert('Add your Apps Script URL and secret token first.'); return; }
   if(db.activeSession && manual && !confirm('You have an active workout. Pulling will keep the active workout, but it is safer to finish/export first. Continue?')) return;
   try{
-    const res = await jsonp(c.url, {action:'pullLatest', token:c.token, reason, at:nowIso()});
+    const res = await pullWithFallbacks(c, reason);
     if(!res || !res.ok) throw new Error((res && res.error) || 'Apps Script returned no data.');
-    if(!res.db){ c.lastPull=nowIso(); c.lastPullError=''; save(); if(manual) alert('Connected, but no cloud backup exists yet. Press Push all data now first on your main device.'); return; }
+    if(!res.db){ c.lastPull=nowIso(); c.lastPullError=''; c.lastDiagnostic='Connected but cloud backup is empty. Push once from the main device.'; save(); if(manual) alert('Connected, but no cloud backup exists yet. Press Push all data now first on your main device.'); return; }
     const info = mergeRemoteDb(res.db);
     const cc = cloudCfg();
-    cc.lastPull = nowIso(); cc.lastPullError = ''; cc.lastRemoteSavedAt = res.savedAt || '';
+    cc.lastPull = nowIso(); cc.lastPullError = ''; cc.lastRemoteSavedAt = res.savedAt || ''; cc.lastDiagnostic = 'Pull ok via ' + (cc.lastPullMethod||'unknown') + ' at ' + new Date().toLocaleString();
     save();
     if(manual) alert(info.changed ? `Pulled and merged cloud data. Sessions: ${info.before.sessions} → ${info.after.sessions}.` : 'Pulled latest. No new data to merge.');
     if(info.changed) render();
   }catch(err){
-    const cc = cloudCfg(); cc.lastPullError = err && err.message ? err.message : String(err); save();
+    const cc = cloudCfg(); cc.lastPullError = err && err.message ? err.message : String(err); cc.lastDiagnostic = 'Pull failed at ' + new Date().toLocaleString() + ': ' + cc.lastPullError; save();
     if(manual) alert('Could not pull from Sheets: ' + cc.lastPullError);
+  }
+}
+
+function currentSyncFormToConfig(){
+  const c = cloudCfg();
+  const u=$('#syncUrl'), t=$('#syncToken'), en=$('#syncEnabled'), au=$('#syncAuto'), ap=$('#syncAutoPull');
+  if(u) c.url=u.value.trim(); if(t) c.token=t.value.trim(); if(en) c.enabled=en.checked; if(au) c.auto=au.checked; if(ap) c.autoPull=ap.checked;
+  save();
+  return c;
+}
+function pullTestUrl(){
+  const c = currentSyncFormToConfig();
+  if(!c.url || !c.token) return '';
+  return c.url + (c.url.includes('?')?'&':'?') + 'action=pullLatest&token=' + encodeURIComponent(c.token) + '&at=' + encodeURIComponent(nowIso());
+}
+async function runSyncDiagnostics(){
+  const c = currentSyncFormToConfig();
+  if(!c.url || !c.token){ alert('Add Apps Script URL and token first.'); return; }
+  const lines = [];
+  lines.push('App build: ' + APP_VERSION);
+  lines.push('URL present: yes');
+  lines.push('Token present: yes');
+  try{
+    const ping = await jsonp(c.url, {action:'ping', at:nowIso(), build:APP_VERSION}, 10000);
+    lines.push('Ping: ' + (ping && ping.ok ? 'ok' : 'not ok'));
+  }catch(err){ lines.push('Ping failed: ' + (err && err.message ? err.message : String(err))); }
+  try{
+    const res = await pullWithFallbacks(c, 'diagnostic');
+    lines.push('Pull: ' + (res && res.ok ? 'ok' : 'not ok'));
+    lines.push('Pull method: ' + (c.lastPullMethod || '-'));
+    lines.push('Cloud savedAt: ' + ((res && res.savedAt) || '-'));
+    lines.push('Cloud DB: ' + (res && res.db ? ((res.db.sessions||[]).length + ' sessions, ' + (res.db.exercises||[]).length + ' exercises') : 'empty'));
+    c.lastDiagnostic = lines.join(' | ');
+    save();
+    alert(lines.join('\n'));
+  }catch(err){
+    lines.push('Pull failed: ' + (err && err.message ? err.message : String(err)));
+    c.lastDiagnostic = lines.join(' | ');
+    save();
+    alert(lines.join('\n'));
   }
 }
 function renderSettings(){
   const bytes = new Blob([JSON.stringify(db)]).size;
   const backup = db.settings.lastBackupAt ? new Date(db.settings.lastBackupAt).toLocaleString() : 'never';
-  return `<div class="grid cols2"><div class="card"><h3>Storage explained</h3><div class="notice"><strong>Why data changes between browsers:</strong><br>Forge stores logs in this browser’s localStorage. Chrome, Edge, Safari, phone browser, and private tabs do not share the same saved data. Different file paths can also behave like different storage places.</div><p class="muted small">Current key: <span class="kbd">${APP_KEY}</span><br>Data size: ${Math.round(bytes/1024)} KB<br>Last manual backup: ${esc(backup)}</p><div class="row"><button class="btn primary" id="exportData">Export JSON backup</button><label class="btn">Import JSON<input id="importData" type="file" accept="application/json" hidden></label><button class="btn bad" id="wipeData">Wipe this browser</button></div></div><div class="card"><h3>Preferences</h3><div class="fields two"><div class="field"><label>Name</label><input id="setName" value="${esc(db.settings.name||'')}"></div><div class="field"><label>Theme</label><select id="setTheme"><option value="dark" ${db.settings.theme==='dark'?'selected':''}>dark</option><option value="light" ${db.settings.theme==='light'?'selected':''}>light</option></select></div><div class="field"><label>Default rest sec</label><input id="setRest" type="number" value="${db.settings.defaultRest||120}"></div><div class="field"><label>Default increment kg</label><input id="setInc" type="number" step="0.5" value="${db.settings.defaultIncrement||2.5}"></div><div class="field"><label>Age for HR zones</label><input id="setAge" type="number" value="${db.settings.age||18}"></div></div><button class="btn primary" id="saveSettings" style="margin-top:10px">Save settings</button></div></div><div class="grid cols2" style="margin-top:16px">${sheetSyncCard()}<div class="card"><h3>Data safety</h3><p class="muted">Best setup: phone local storage for speed, Google Sheet mirror for easy viewing, and manual JSON exports for full restore.</p><div class="row"><span class="pill good">Local-first</span><span class="pill good">Optional Sheets mirror</span><span class="pill good">Manual JSON backup</span></div><p class="muted small">Do not put your secret token in GitHub. Only type it into this Settings page on your own phone.</p></div></div><div class="card" style="margin-top:16px"><h3>Feature checklist added</h3><div class="row"><span class="pill good">Individual exercise graphs</span><span class="pill good">Next targets</span><span class="pill good">Best / safe / stretch / avoid</span><span class="pill good">Rep records</span><span class="pill good">RPE field</span><span class="pill good">Set types</span><span class="pill good">Custom rep range</span><span class="pill good">Two-way Sheets sync</span><span class="pill good">200-exercise library</span><span class="pill good">Template builder</span><span class="pill good">Superset groups</span><span class="pill good">Overtime targets</span><span class="pill good">Stacking logic</span><span class="pill good">Coach readiness</span><span class="pill good">Weekly muscle load</span><span class="pill good">Deload warnings</span><span class="pill good">Calculation methods</span></div></div>`;
+  return `<div class="grid cols2"><div class="card"><h3>Storage explained</h3><div class="notice"><strong>Why data changes between browsers:</strong><br>Forge stores logs in this browser’s localStorage. Chrome, Edge, Safari, phone browser, and private tabs do not share the same saved data. Different file paths can also behave like different storage places.</div><p class="muted small">App build: <span class="kbd">${APP_VERSION}</span><br>Build date: <span class="kbd">${APP_BUILD_DATE}</span><br>Current key: <span class="kbd">${APP_KEY}</span><br>Data size: ${Math.round(bytes/1024)} KB<br>Last manual backup: ${esc(backup)}</p><div class="row"><button class="btn primary" id="exportData">Export JSON backup</button><label class="btn">Import JSON<input id="importData" type="file" accept="application/json" hidden></label><button class="btn bad" id="wipeData">Wipe this browser</button></div></div><div class="card"><h3>Preferences</h3><div class="fields two"><div class="field"><label>Name</label><input id="setName" value="${esc(db.settings.name||'')}"></div><div class="field"><label>Theme</label><select id="setTheme"><option value="dark" ${db.settings.theme==='dark'?'selected':''}>dark</option><option value="light" ${db.settings.theme==='light'?'selected':''}>light</option></select></div><div class="field"><label>Default rest sec</label><input id="setRest" type="number" value="${db.settings.defaultRest||120}"></div><div class="field"><label>Default increment kg</label><input id="setInc" type="number" step="0.5" value="${db.settings.defaultIncrement||2.5}"></div><div class="field"><label>Age for HR zones</label><input id="setAge" type="number" value="${db.settings.age||18}"></div></div><button class="btn primary" id="saveSettings" style="margin-top:10px">Save settings</button></div></div><div class="grid cols2" style="margin-top:16px">${sheetSyncCard()}<div class="card"><h3>Data safety</h3><p class="muted">Best setup: phone local storage for speed, Google Sheet mirror for easy viewing, and manual JSON exports for full restore.</p><div class="row"><span class="pill good">Local-first</span><span class="pill good">Optional Sheets mirror</span><span class="pill good">Manual JSON backup</span></div><p class="muted small">Do not put your secret token in GitHub. Only type it into this Settings page on your own phone.</p></div></div><div class="card" style="margin-top:16px"><h3>Feature checklist added</h3><div class="row"><span class="pill good">Individual exercise graphs</span><span class="pill good">Next targets</span><span class="pill good">Best / safe / stretch / avoid</span><span class="pill good">Rep records</span><span class="pill good">RPE field</span><span class="pill good">Set types</span><span class="pill good">Custom rep range</span><span class="pill good">Two-way Sheets sync</span><span class="pill good">200-exercise library</span><span class="pill good">Template builder</span><span class="pill good">Superset groups</span><span class="pill good">Overtime targets</span><span class="pill good">Stacking logic</span><span class="pill good">Coach readiness</span><span class="pill good">Weekly muscle load</span><span class="pill good">Deload warnings</span><span class="pill good">Calculation methods</span></div></div>`;
 }
 function bind(){
   $('#quickLog').onclick=()=>{view='log';render()}; $('#quickExport').onclick=exportData; $('#menuBtn').onclick=()=>$('#side').classList.toggle('open');
@@ -851,10 +934,72 @@ function startWorkout(){
   save(); render();
 }
 function activeExFromId(id, target='', rest=null, groupId=''){ const e=exById(id); const t=targetFor(id); const setsN = target && target.match(/^(\d+)/) ? +target.match(/^(\d+)/)[1] : 3; const sets = Array.from({length:Math.min(setsN||3,4)},()=>({id:uid(),weight:'',reps:'',rpe:'',done:false,type:'working',completedAt:''})); return {exerciseId:id,name:e.name,target:target||`${t.range.min}–${t.range.max}`,rest:rest||db.settings.defaultRest,groupId:groupId||'',sets}; }
+function normSearch(s){
+  return String(s||'').toLowerCase()
+    .replace(/[°º]/g,' degree ')
+    .replace(/[–—_\/\-]/g,' ')
+    .replace(/[^a-z0-9\s]/g,' ')
+    .replace(/\bextention\b/g,' extension ')
+    .replace(/\bext\b/g,' extension ')
+    .replace(/\bdb\b/g,' dumbbell ')
+    .replace(/\bbb\b/g,' barbell ')
+    .replace(/\bohp\b/g,' overhead press ')
+    .replace(/\brdl\b/g,' romanian deadlift ')
+    .replace(/\bbi\b/g,' biceps ')
+    .replace(/\btri\b/g,' triceps ')
+    .replace(/\blat\b/g,' lat lats ')
+    .replace(/\bcalf\b/g,' calf calves ')
+    .replace(/\s+/g,' ')
+    .trim();
+}
+function exerciseAliases(e){
+  const name = normSearch(e.name), muscle = normSearch(e.muscle), equip = normSearch(e.equipment), id = normSearch(e.id);
+  const bits = [name, muscle, equip, id];
+  if(/single leg/.test(name) || /singleleg/.test(id)) bits.push('single unilateral one leg one arm');
+  if(/leg extension/.test(name)) bits.push('quad extension knee extension machine extension');
+  if(/leg curl|hamstring curl|nordic/.test(name)) bits.push('hamstring curl lying curl seated curl leg flexion');
+  if(/lateral raise/.test(name)) bits.push('lat raise side delt raise shoulder raise');
+  if(/rear delt/.test(name)) bits.push('reverse fly rear shoulder posterior delt');
+  if(/pulldown/.test(name)) bits.push('lat pull down back vertical pull');
+  if(/row/.test(name)) bits.push('back pull horizontal pull');
+  if(/bench|press/.test(name) && /chest/.test(muscle)) bits.push('chest press bench');
+  if(/curl/.test(name) && /bicep|brachialis|forearm/.test(muscle)) bits.push('arm curl biceps curl');
+  return normSearch(bits.join(' '));
+}
+function exerciseSearchScore(e, query){
+  const q = normSearch(query);
+  const hay = exerciseAliases(e);
+  if(!q) return 1;
+  const tokens = q.split(' ').filter(Boolean);
+  let score = 0, missed = 0;
+  if(hay.includes(q)) score += 80;
+  tokens.forEach(tok => {
+    if(hay.includes(tok)) score += 18;
+    else {
+      // loose prefix match: "exten" still hits extension, "sing" hits single
+      const hit = hay.split(' ').some(w => w.startsWith(tok) || tok.startsWith(w));
+      if(hit) score += 8; else missed += 1;
+    }
+  });
+  // Prefer exact name starts, then names with all query words anywhere.
+  const n = normSearch(e.name);
+  if(n.startsWith(q)) score += 45;
+  if(tokens.every(t => n.includes(t))) score += 25;
+  if(missed) score -= missed * 20;
+  return score;
+}
+function searchExercisesSmart(query, limit=40){
+  const q = normSearch(query);
+  return db.exercises.map(e => ({e, score: exerciseSearchScore(e,q)}))
+    .filter(x => !q || x.score > 0)
+    .sort((a,b) => b.score - a.score || a.e.name.localeCompare(b.e.name))
+    .slice(0, limit)
+    .map(x => x.e);
+}
 function openExercisePicker(){
-  showModal(`<h3>Add exercise</h3><div class="searchbox"><input id="pickSearch" placeholder="Search exercise..."><div class="results" id="pickResults"></div></div><div class="split"></div><button class="btn" id="closeModal">Close</button>`);
+  showModal(`<h3>Add exercise</h3><div class="searchbox"><input id="pickSearch" placeholder="Try: extension single leg, single extension, lat raise cable, ham curl"><div class="results" id="pickResults"></div></div><p class="muted small">Search is now word-order flexible. Example: typing <span class="kbd">extension single leg</span> will still find <strong>Single-leg Leg Extension</strong>.</p><div class="split"></div><button class="btn" id="closeModal">Close</button>`);
   const search=$('#pickSearch'), results=$('#pickResults');
-  function draw(){ const q=search.value.toLowerCase(); const list=db.exercises.filter(e=>(e.name+' '+e.muscle+' '+e.equipment).toLowerCase().includes(q)).slice(0,30); results.innerHTML=list.map(e=>`<div class="result" data-add-ex-id="${e.id}"><strong>${esc(e.name)}</strong><div class="muted small">${esc(e.muscle)} · ${esc(e.equipment)}</div><div class="small">Next: ${esc(targetFor(e.id).best)}</div></div>`).join(''); $$('[data-add-ex-id]').forEach(r=>r.onclick=()=>{db.activeSession.exercises.push(activeExFromId(r.dataset.addExId)); hideModal(); save(); render();}); }
+  function draw(){ const q=search.value; const list=searchExercisesSmart(q,40); results.innerHTML=list.map(e=>`<div class="result" data-add-ex-id="${e.id}"><strong>${esc(e.name)}</strong><div class="muted small">${esc(e.muscle)} · ${esc(e.equipment)}</div><div class="small">Next: ${esc(targetFor(e.id).best)}</div></div>`).join('') || '<div class="result muted">No match. Try fewer words, e.g. "single extension" or "leg ext".</div>'; $$('[data-add-ex-id]').forEach(r=>r.onclick=()=>{db.activeSession.exercises.push(activeExFromId(r.dataset.addExId)); hideModal(); save(); render();}); }
   search.oninput=draw; $('#closeModal').onclick=hideModal; draw(); search.focus();
 }
 function copyPreviousIntoActive(i){
@@ -882,7 +1027,9 @@ function bindSettings(){
   const saveSync=$('#saveSyncSettings'); if(saveSync) saveSync.onclick=()=>{ const c=cloudCfg(); c.url=$('#syncUrl').value.trim(); c.token=$('#syncToken').value.trim(); c.enabled=$('#syncEnabled').checked; c.auto=$('#syncAuto').checked; c.autoPull=$('#syncAutoPull').checked; c.lastError=''; c.lastPullError=''; save(); alert('Sheets sync settings saved on this device only.'); render(); };
   const syncNow=$('#syncNow'); if(syncNow) syncNow.onclick=()=>{ const c=cloudCfg(); c.url=$('#syncUrl').value.trim(); c.token=$('#syncToken').value.trim(); c.enabled=$('#syncEnabled').checked; c.auto=$('#syncAuto').checked; c.autoPull=$('#syncAutoPull').checked; save(); syncAllToSheets(true, 'manual'); };
   const pullNow=$('#pullNow'); if(pullNow) pullNow.onclick=()=>{ const c=cloudCfg(); c.url=$('#syncUrl').value.trim(); c.token=$('#syncToken').value.trim(); c.enabled=$('#syncEnabled').checked; c.auto=$('#syncAuto').checked; c.autoPull=$('#syncAutoPull').checked; save(); pullLatestFromSheets(true, 'manual'); };
-  const help=$('#copyScriptHelp'); if(help) help.onclick=()=>{ showModal(`<div class="between"><h3>Google Sheets setup</h3><button class="btn" id="closeModal">Close</button></div><ol class="muted"><li>Create a Google Sheet named Forge Training Log.</li><li>Go to Extensions → Apps Script.</li><li>Paste the code from <strong>google-apps-script.gs</strong>.</li><li>Change <strong>SECRET_TOKEN</strong> to your own random phrase.</li><li>Deploy → New deployment → Web app.</li><li>Execute as: Me. Access: Anyone with the link.</li><li>Copy the /exec URL back into Forge Settings.</li><li>Press Pull latest now / Push all data now to test both directions.</li></ol><p class="muted small">The token and URL are stored only in this browser/app storage. Do not upload them to GitHub.</p>`); $('#closeModal').onclick=hideModal; };
+  const diag=$('#syncDiagnostics'); if(diag) diag.onclick=runSyncDiagnostics;
+  const openPull=$('#openPullUrl'); if(openPull) openPull.onclick=()=>{ const u=pullTestUrl(); if(!u){ alert('Add Apps Script URL and token first.'); return; } window.open(u, '_blank'); };
+  const help=$('#copyScriptHelp'); if(help) help.onclick=()=>{ showModal(`<div class="between"><h3>Google Sheets setup</h3><button class="btn" id="closeModal">Close</button></div><ol class="muted"><li>Create a Google Sheet named Forge Training Log.</li><li>Go to Extensions → Apps Script.</li><li>Paste the v9.4 code from <strong>google-apps-script.gs</strong>.</li><li>Change <strong>SECRET_TOKEN</strong> to your own random phrase.</li><li>Deploy → New deployment → Web app.</li><li>Execute as: Me. Access: Anyone with the link.</li><li>Copy the /exec URL back into Forge Settings.</li><li>Press Push all data now once from your main device, then Run diagnostics and Pull latest now. The v9.4 backend supports both JSONP and iframe pull fallback.</li></ol><p class="muted small">The token and URL are stored only in this browser/app storage. Do not upload them to GitHub.</p>`); $('#closeModal').onclick=hideModal; };
 }
 
 function exportData(){ db.settings.lastBackupAt=nowIso(); save(); const blob = new Blob([JSON.stringify(db,null,2)],{type:'application/json'}); const a=document.createElement('a'); a.href=URL.createObjectURL(blob); a.download=`forge-athlete-backup-${today()}.json`; a.click(); setTimeout(()=>URL.revokeObjectURL(a.href),1000); }
