@@ -47,10 +47,10 @@ input,select,textarea{width:100%;border:1px solid var(--line);background:var(--p
 <body>
 <div class="app" id="app">
   <aside class="side" id="side">
-    <div class="brand"><div class="logo"></div><div><h1>Forge Athlete</h1><p>two-way synced training log</p><p class="small muted" id="buildBadge">Build v9.5 Sync Debug + Search</p></div></div>
+    <div class="brand"><div class="logo"></div><div><h1>Forge Athlete</h1><p>two-way synced training log</p><p class="small muted" id="buildBadge">Build v9.6 iPhone Chunked Pull + Search</p></div></div>
     <div class="notice small">Local-first. Optional two-way Google Sheets sync in Settings.</div>
     <nav class="nav" id="nav"></nav>
-    <div class="footer-note">Build: <span class="kbd">v9.5 Sync Debug + Search</span><br>Storage key: <span class="kbd">forge_fitness_tracker_v5</span></div>
+    <div class="footer-note">Build: <span class="kbd">v9.6 iPhone Chunked Pull + Search</span><br>Storage key: <span class="kbd">forge_fitness_tracker_v5</span></div>
   </aside>
   <main class="main">
     <div class="topbar"><div><button class="btn mobile-menu" id="menuBtn">☰</button><h2 id="pageTitle">Dashboard</h2><div class="sub" id="pageSub">Training overview</div></div><div class="row"><button class="btn" id="quickExport">Export</button><button class="btn primary" id="quickLog">Start workout</button></div></div>
@@ -63,8 +63,8 @@ input,select,textarea{width:100%;border:1px solid var(--line);background:var(--p
 (() => {
 'use strict';
 const APP_KEY = 'forge_fitness_tracker_v5';
-const APP_VERSION = 'v9.5 Sync Debug + Fuzzy Search';
-const REQUIRED_BACKEND_VERSION = 'v9.5';
+const APP_VERSION = 'v9.6 iPhone Chunked Pull + Fuzzy Search';
+const REQUIRED_BACKEND_VERSION = 'v9.6';
 const APP_BUILD_DATE = '2026-07-09';
 const versionBadgeEl = document.getElementById('appVersionBadge'); if(versionBadgeEl) versionBadgeEl.textContent = APP_VERSION;
 const OLD_KEYS = ['forge_fitness_tracker_v4','forge_fitness_tracker_v3','hevy_local_tracker_v2'];
@@ -801,7 +801,7 @@ function iframePull(url, params={}, timeoutMs=18000){
     const src = url + (url.includes('?')?'&':'?') + qs;
     const iframe = document.createElement('iframe');
     iframe.style.position='fixed'; iframe.style.left='-9999px'; iframe.style.top='-9999px'; iframe.style.width='1px'; iframe.style.height='1px'; iframe.style.opacity='0';
-    const timer = setTimeout(()=>{ cleanup(); reject(new Error('Frame pull timed out. Apps Script deployment is not responding to v9.5 pullFrame. Redeploy Apps Script as a NEW VERSION and make sure Forge uses the /exec URL.')); }, timeoutMs);
+    const timer = setTimeout(()=>{ cleanup(); reject(new Error('Frame pull timed out. Apps Script deployment is not responding to v9.6 pullFrame. Redeploy Apps Script as a NEW VERSION and make sure Forge uses the /exec URL.')); }, timeoutMs);
     function cleanup(){ clearTimeout(timer); window.removeEventListener('message', onMsg); if(iframe.parentNode) iframe.parentNode.removeChild(iframe); }
     function onMsg(event){
       const data = event.data || {};
@@ -815,22 +815,45 @@ function iframePull(url, params={}, timeoutMs=18000){
     document.body.appendChild(iframe);
   });
 }
+async function chunkedPull(url, token, reason, timeoutMs=12000){
+  const meta = await jsonp(url, {action:'pullMeta', token, reason, at:nowIso(), build:APP_VERSION}, timeoutMs);
+  if(!meta || !meta.ok) throw new Error((meta && meta.error) || 'pullMeta returned no data');
+  if(!meta.chunks || meta.chunks < 1) return {ok:true, savedAt:meta.savedAt||'', db:null};
+  const pieces = [];
+  for(let i=1; i<=meta.chunks; i++){
+    const part = await jsonp(url, {action:'pullChunk', token, index:i, reason, at:nowIso(), build:APP_VERSION}, timeoutMs);
+    if(!part || !part.ok) throw new Error((part && part.error) || ('pullChunk '+i+' failed'));
+    pieces.push(part.chunk || '');
+  }
+  const text = pieces.join('');
+  if(meta.chars && text.length !== Number(meta.chars)) throw new Error('Chunk length mismatch. Expected '+meta.chars+' chars but got '+text.length+'. Push again from laptop, then retry.');
+  const envelope = JSON.parse(text);
+  return {ok:true, savedAt:envelope.savedAt || meta.savedAt || '', db:envelope.db || null};
+}
+
 async function pullWithFallbacks(c, reason){
-  let firstErr = '';
+  const errors = [];
+  try{
+    const res = await chunkedPull(c.url, c.token, reason, 12000);
+    c.lastPullMethod = 'chunked';
+    return res;
+  }catch(err){
+    errors.push('chunked failed: ' + (err && err.message ? err.message : String(err)));
+  }
   try{
     const res = await jsonp(c.url, {action:'pullLatest', token:c.token, reason, at:nowIso(), build:APP_VERSION}, 14000);
     c.lastPullMethod = 'jsonp';
     return res;
   }catch(err){
-    firstErr = err && err.message ? err.message : String(err);
+    errors.push('JSONP failed: ' + (err && err.message ? err.message : String(err)));
   }
   try{
     const res = await iframePull(c.url, {token:c.token, reason, at:nowIso(), build:APP_VERSION}, 18000);
     c.lastPullMethod = 'iframe';
     return res;
   }catch(err){
-    const secondErr = err && err.message ? err.message : String(err);
-    throw new Error('JSONP failed: ' + firstErr + ' | iframe failed: ' + secondErr);
+    errors.push('iframe failed: ' + (err && err.message ? err.message : String(err)));
+    throw new Error(errors.join(' | '));
   }
 }
 
@@ -879,8 +902,8 @@ async function runSyncDiagnostics(){
     const ping = await jsonp(c.url, {action:'ping', at:nowIso(), build:APP_VERSION}, 10000);
     lines.push('Ping: ' + (ping && ping.ok ? 'ok' : 'not ok'));
     lines.push('Backend version: ' + ((ping && ping.version) || 'missing/old'));
-    backendOk = !!(ping && ping.ok && String(ping.version||'').includes('9.5'));
-    if(!backendOk) lines.push('FIX: Apps Script is not the v9.5 backend. Paste google-apps-script.gs, save, then Deploy > Manage deployments > Edit > Version: New version > Deploy.');
+    backendOk = !!(ping && ping.ok && String(ping.version||'').includes('9.6'));
+    if(!backendOk) lines.push('FIX: Apps Script is not the v9.6 backend. Paste google-apps-script.gs, save, then Deploy > Manage deployments > Edit > Version: New version > Deploy.');
   }catch(err){
     lines.push('Ping failed: ' + (err && err.message ? err.message : String(err)));
     lines.push('FIX: the /exec URL is unreachable or Apps Script was not redeployed. Open the ping URL directly in Safari.');
@@ -888,7 +911,7 @@ async function runSyncDiagnostics(){
   try{
     const res = await pullWithFallbacks(c, 'diagnostic');
     lines.push('Pull: ' + (res && res.ok ? 'ok' : 'not ok'));
-    lines.push('Pull method: ' + (c.lastPullMethod || '-'));
+    lines.push('Pull method: ' + (c.lastPullMethod || '-') + ' (chunked is best for iPhone)');
     lines.push('Cloud savedAt: ' + ((res && res.savedAt) || '-'));
     lines.push('Cloud DB: ' + (res && res.db ? ((res.db.sessions||[]).length + ' sessions, ' + (res.db.exercises||[]).length + ' exercises') : 'empty'));
     if(res && res.ok && !res.db) lines.push('FIX: backend works but cloud backup is empty. Push all data now from the device with the latest logs.');
@@ -1040,7 +1063,7 @@ function bindSettings(){
   const pullNow=$('#pullNow'); if(pullNow) pullNow.onclick=()=>{ const c=cloudCfg(); c.url=$('#syncUrl').value.trim(); c.token=$('#syncToken').value.trim(); c.enabled=$('#syncEnabled').checked; c.auto=$('#syncAuto').checked; c.autoPull=$('#syncAutoPull').checked; save(); pullLatestFromSheets(true, 'manual'); };
   const diag=$('#syncDiagnostics'); if(diag) diag.onclick=runSyncDiagnostics;
   const openPull=$('#openPullUrl'); if(openPull) openPull.onclick=()=>{ const u=pullTestUrl(); if(!u){ alert('Add Apps Script URL and token first.'); return; } window.open(u, '_blank'); };
-  const help=$('#copyScriptHelp'); if(help) help.onclick=()=>{ showModal(`<div class="between"><h3>Google Sheets setup</h3><button class="btn" id="closeModal">Close</button></div><ol class="muted"><li>Create a Google Sheet named Forge Training Log.</li><li>Go to Extensions → Apps Script.</li><li>Paste the v9.5 code from <strong>google-apps-script.gs</strong>.</li><li>Change <strong>SECRET_TOKEN</strong> to your own random phrase.</li><li>Deploy → New deployment → Web app.</li><li>Execute as: Me. Access: Anyone with the link.</li><li>Copy the /exec URL back into Forge Settings.</li><li>Press Push all data now once from your main device, then Run diagnostics and Pull latest now. The v9.5 backend supports ping, JSONP pull, and iframe pull fallback.</li></ol><p class="muted small">The token and URL are stored only in this browser/app storage. Do not upload them to GitHub.</p>`); $('#closeModal').onclick=hideModal; };
+  const help=$('#copyScriptHelp'); if(help) help.onclick=()=>{ showModal(`<div class="between"><h3>Google Sheets setup</h3><button class="btn" id="closeModal">Close</button></div><ol class="muted"><li>Create a Google Sheet named Forge Training Log.</li><li>Go to Extensions → Apps Script.</li><li>Paste the v9.6 code from <strong>google-apps-script.gs</strong>.</li><li>Change <strong>SECRET_TOKEN</strong> to your own random phrase.</li><li>Deploy → New deployment → Web app.</li><li>Execute as: Me. Access: Anyone with the link.</li><li>Copy the /exec URL back into Forge Settings.</li><li>Press Push all data now once from your main device, then Run diagnostics and Pull latest now. The v9.6 backend supports ping, small chunked iPhone pull, JSONP pull, and iframe pull fallback.</li></ol><p class="muted small">The token and URL are stored only in this browser/app storage. Do not upload them to GitHub.</p>`); $('#closeModal').onclick=hideModal; };
 }
 
 function exportData(){ db.settings.lastBackupAt=nowIso(); save(); const blob = new Blob([JSON.stringify(db,null,2)],{type:'application/json'}); const a=document.createElement('a'); a.href=URL.createObjectURL(blob); a.download=`forge-athlete-backup-${today()}.json`; a.click(); setTimeout(()=>URL.revokeObjectURL(a.href),1000); }

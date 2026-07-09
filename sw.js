@@ -1,4 +1,4 @@
-const CACHE_NAME = 'forge-pwa-v9.5.0-sync-debug';
+const CACHE_NAME = 'forge-pwa-v9.6.0-iphone-chunked-pull';
 const APP_SHELL = [
   './',
   './index.html',

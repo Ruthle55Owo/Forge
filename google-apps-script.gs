@@ -1,7 +1,7 @@
 /**
- * Forge Athlete v9.5 -> Google Sheets two-way sync
+ * Forge Athlete v9.6 -> Google Sheets two-way sync
  *
- * Fix for: Push works, Pull fails on phone. Adds iframe pull fallback + visible app/backend diagnostics.
+ * Fix for: Push works, Pull fails on iPhone. Adds small chunked pull + iframe fallback + visible app/backend diagnostics.
  *
  * The important change: the latest full Forge JSON is stored inside the same
  * spreadsheet in a chunked LatestBackup tab. Pull reads from that tab, so it
@@ -27,13 +27,27 @@ function doGet(e) {
   const p = (e && e.parameter) || {};
   try {
     if (p.action === 'ping') {
-      return output_({ ok: true, message: 'Forge sync backend is reachable.', version: 'v9.5', at: new Date().toISOString() }, p.callback);
+      return output_({ ok: true, message: 'Forge sync backend is reachable.', version: 'v9.6', at: new Date().toISOString() }, p.callback);
     }
 
     if (p.action === 'pullFrame') {
       if (p.token !== SECRET_TOKEN) return frameOutput_(p.pullId || '', { ok: false, error: 'Bad or missing token.' });
       const latest = readLatestBackupFromSheet_();
       return frameOutput_(p.pullId || '', { ok: true, savedAt: latest.savedAt || '', db: latest.db || null });
+    }
+
+    if (p.action === 'pullMeta') {
+      if (p.token !== SECRET_TOKEN) return output_({ ok: false, error: 'Bad or missing token.' }, p.callback);
+      const latest = readLatestBackupChunks_();
+      return output_({ ok: true, savedAt: latest.savedAt || '', chunks: latest.chunks.length, chars: latest.chars || 0, schema: latest.schema || 'sheet-chunks-v1' }, p.callback);
+    }
+
+    if (p.action === 'pullChunk') {
+      if (p.token !== SECRET_TOKEN) return output_({ ok: false, error: 'Bad or missing token.' }, p.callback);
+      const latest = readLatestBackupChunks_();
+      const idx = Math.max(1, parseInt(p.index || '1', 10));
+      const chunk = latest.chunks[idx - 1] || '';
+      return output_({ ok: true, savedAt: latest.savedAt || '', index: idx, chunks: latest.chunks.length, chunk: chunk }, p.callback);
     }
 
     if (p.action === 'pullLatest') {
@@ -106,6 +120,31 @@ function writeLatestBackupToSheet_(db, savedAt, payload) {
   sh.getRange(1, 1, rows.length, 3).setValues(rows);
   sh.setFrozenRows(1);
   try { sh.hideSheet(); } catch (e) {}
+}
+
+function readLatestBackupChunks_() {
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  const sh = ss.getSheetByName(LATEST_BACKUP_SHEET);
+  if (!sh) return { savedAt: '', chunks: [], chars: 0, schema: 'sheet-chunks-v1' };
+
+  const values = sh.getDataRange().getValues();
+  if (!values || values.length < 2) return { savedAt: '', chunks: [], chars: 0, schema: 'sheet-chunks-v1' };
+
+  let savedAt = '';
+  let chars = 0;
+  let schema = 'sheet-chunks-v1';
+  const chunks = [];
+  values.slice(1).forEach(row => {
+    const type = String(row[0] || '');
+    const index = row[1];
+    const value = row[2];
+    if (type === 'meta' && index === 'savedAt') savedAt = String(value || '');
+    if (type === 'meta' && index === 'chars') chars = Number(value) || 0;
+    if (type === 'meta' && index === 'schema') schema = String(value || schema);
+    if (type === 'chunk') chunks.push({ index: Number(index) || 0, value: String(value || '') });
+  });
+  chunks.sort((a, b) => a.index - b.index);
+  return { savedAt: savedAt, chunks: chunks.map(x => x.value), chars: chars, schema: schema };
 }
 
 function readLatestBackupFromSheet_() {

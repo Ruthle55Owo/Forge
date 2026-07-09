@@ -1,8 +1,8 @@
 {
   "name": "Forge \u2014 Training Tracker",
   "short_name": "Forge",
-  "description": "Comprehensive local-first workout, recovery, progression and cardio tracker. v9.5 sync debug, backend version check and fuzzy exercise search.",
-  "start_url": "./?v=v9_5_sync_debug",
+  "description": "Local-first workout, progression, recovery and sync tracker.",
+  "start_url": "./?v=9.6-iphone-chunked-pull",
   "scope": "./",
   "display": "standalone",
   "orientation": "portrait",
