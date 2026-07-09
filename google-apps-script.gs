@@ -1,5 +1,5 @@
 /**
- * Forge Athlete v9.4 -> Google Sheets two-way sync
+ * Forge Athlete v9.5 -> Google Sheets two-way sync
  *
  * Fix for: Push works, Pull fails on phone. Adds iframe pull fallback + visible app/backend diagnostics.
  *
@@ -27,7 +27,7 @@ function doGet(e) {
   const p = (e && e.parameter) || {};
   try {
     if (p.action === 'ping') {
-      return output_({ ok: true, message: 'Forge sync backend is reachable.', version: 'v9.4', at: new Date().toISOString() }, p.callback);
+      return output_({ ok: true, message: 'Forge sync backend is reachable.', version: 'v9.5', at: new Date().toISOString() }, p.callback);
     }
 
     if (p.action === 'pullFrame') {

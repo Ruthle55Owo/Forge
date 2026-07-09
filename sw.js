@@ -1,4 +1,4 @@
-const CACHE_NAME = 'forge-pwa-v9.4.0-diagnostics-search';
+const CACHE_NAME = 'forge-pwa-v9.5.0-sync-debug';
 const APP_SHELL = [
   './',
   './index.html',
