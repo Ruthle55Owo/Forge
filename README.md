@@ -40,3 +40,23 @@ Do not upload workout backup JSON files.
 ## Important
 
 Readiness scoring is a coaching heuristic, not a medical diagnosis or injury prediction model. It is designed to make progression smarter by combining performance history, recent load, live fatigue, and recovery check-ins.
+
+
+## v9.1 Sync Pull Fix
+
+This patch keeps the same Forge app UI, but replaces the Google Apps Script sync backend with a more robust pull system.
+
+Why: older sync saved the readable Sheets tabs and the latest full JSON through Drive. Some devices could push visible rows but fail to pull because the full backup file was missing, old, or inaccessible. v9.1 stores the latest full Forge database inside the spreadsheet itself in safe chunks, then `pullLatest` rebuilds it from the `LatestBackup` tab.
+
+After uploading the new files, also replace your Apps Script code with the included `google-apps-script.gs`, set `SECRET_TOKEN`, and deploy a new web app version.
+
+Test in a browser with:
+
+`/exec?action=pullLatest&token=YOUR_TOKEN`
+
+Expected result: `{"ok":true,"db":{...}}` or `{"ok":true,"db":null}` before the first successful push.
+
+
+## v9.2 Muscle token fix
+
+Fixed an important Coach/readiness bug where any exercise name containing "curl" was counted as biceps. This meant Leg Curl / Seated Leg Curl / Nordic Hamstring Curl could incorrectly mark biceps as recently trained. Forge now treats lower-body curls as hamstrings and only counts biceps when the exercise metadata or name clearly indicates an arm curl.

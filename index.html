@@ -224,9 +224,31 @@ function roundToInc(value, inc){ inc = num(inc)||2.5; return Math.round(num(valu
 function formatSets(sets){ return sets.map(s=>`${round(s.weight,1)}×${s.reps}`).join(', '); }
 
 function muscleTokensFor(exerciseId){
-  const txt = ((exById(exerciseId).muscle||'') + ' ' + (exById(exerciseId).name||'')).toLowerCase();
+  const e = exById(exerciseId);
+  const muscleTxt = (e.muscle||'').toLowerCase();
+  const nameTxt = (e.name||'').toLowerCase();
+  const txt = muscleTxt + ' ' + nameTxt;
   const tokens=[];
-  [['chest','chest'],['back','back'],['lat','back'],['row','back'],['shoulder','shoulders'],['delt','shoulders'],['quad','quads'],['leg press','quads'],['hamstring','hamstrings'],['rdl','hamstrings'],['glute','glutes'],['bicep','biceps'],['curl','biceps'],['tricep','triceps'],['calf','calves'],['core','core'],['abs','core']].forEach(([needle,label])=>{ if(txt.includes(needle) && !tokens.includes(label)) tokens.push(label); });
+  const add = label => { if(!tokens.includes(label)) tokens.push(label); };
+
+  // Prefer the exercise's muscle metadata over broad name guesses.
+  // Important bug fix: do NOT classify every exercise containing "curl" as biceps.
+  // Leg curl / hamstring curl / nordic curl are hamstring work, not upper-body biceps work.
+  const rules = [
+    ['chest','chest'], ['back','back'], ['lat','back'], ['row','back'],
+    ['shoulder','shoulders'], ['delt','shoulders'],
+    ['quad','quads'], ['leg press','quads'],
+    ['hamstring','hamstrings'], ['rdl','hamstrings'], ['glute','glutes'],
+    ['bicep','biceps'], ['tricep','triceps'],
+    ['calf','calves'], ['core','core'], ['abs','core']
+  ];
+  rules.forEach(([needle,label])=>{ if(txt.includes(needle)) add(label); });
+
+  // Name-only fallback for curls that are actually arm curls and may have incomplete metadata.
+  const isLowerBodyCurl = /leg curl|hamstring curl|nordic/.test(nameTxt) || /hamstring/.test(muscleTxt);
+  const isWristOnlyCurl = /wrist curl/.test(nameTxt) && !/bicep/.test(muscleTxt);
+  if(/curl/.test(nameTxt) && !isLowerBodyCurl && !isWristOnlyCurl) add('biceps');
+
   return tokens.length ? tokens : ['general'];
 }
 function sessionForEntry(entry){ return entry ? (db.sessions||[]).find(s=>s.id===entry.sessionId) : null; }
