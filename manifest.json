@@ -1,13 +1,16 @@
 {
-  "name": "Forge \u2014 Training Tracker",
+  "id": "./",
+  "name": "Forge Athlete Pro",
   "short_name": "Forge",
-  "description": "Local-first workout, progression, recovery and sync tracker.",
-  "start_url": "./?v=9.6-iphone-chunked-pull",
+  "description": "Local-first strength, cardio, recovery, progression and workout planning tracker.",
+  "start_url": "./?build=10.0.0",
   "scope": "./",
   "display": "standalone",
+  "display_override": ["standalone", "minimal-ui"],
   "orientation": "portrait",
   "background_color": "#070a12",
   "theme_color": "#070a12",
+  "categories": ["fitness", "health", "productivity"],
   "icons": [
     {
       "src": "./icon-180.png",
